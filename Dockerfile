@@ -29,4 +29,4 @@ RUN mkdir -p /app/results
 # We run Gunicorn wrapped by Xvfb so Selenium/Chrome can run without changing your code
 # Note: Render will send SIGTERM; use tini as init to reap zombies.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["bash", "-lc", "xvfb-run -a -s '-screen 0 1280x1024x24' gunicorn app:app --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 180"]
+CMD ["bash", "-lc", "gunicorn -k gthread -w 2 -b 0.0.0.0:${PORT} app:app"]
