@@ -14,6 +14,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import undetected_chromedriver as uc
+from scraper_core.driver_factory import make_uc_driver
 
 TEST_URL = "https://www.zillow.com/appling-county-ga/land/?searchQueryState=%7B%22pagination%22%3A%7B%7D%2C%22isMapVisible%22%3Atrue%2C%22mapBounds%22%3A%7B%22west%22%3A-83.10302324414062%2C%22east%22%3A-81.49627275585937%2C%22south%22%3A31.276637324224254%2C%22north%22%3A32.15744225314186%7D%2C%22regionSelection%22%3A%5B%7B%22regionId%22%3A1516%2C%22regionType%22%3A4%7D%5D%2C%22filterState%22%3A%7B%22sort%22%3A%7B%22value%22%3A%22globalrelevanceex%22%7D%2C%22sf%22%3A%7B%22value%22%3Afalse%7D%2C%22tow%22%3A%7B%22value%22%3Afalse%7D%2C%22mf%22%3A%7B%22value%22%3Afalse%7D%2C%22con%22%3A%7B%22value%22%3Afalse%7D%2C%22apa%22%3A%7B%22value%22%3Afalse%7D%2C%22manu%22%3A%7B%22value%22%3Afalse%7D%2C%22apco%22%3A%7B%22value%22%3Afalse%7D%2C%22lot%22%3A%7B%22min%22%3A0%2C%22max%22%3A87120%2C%22units%22%3Anull%7D%2C%22doz%22%3A%7B%22value%22%3A%2212m%22%7D%7D%2C%22isListVisible%22%3Atrue%2C%22usersSearchTerm%22%3A%22Appling%20County%20GA%22%7D"
 
@@ -179,7 +180,9 @@ def scrape(url: str) -> List[Row]:
         chrome_options.add_argument("--password-store=basic")
         # chrome_options.add_argument("--headless=new")  # opzionale
 
-        driver = uc.Chrome(options=chrome_options)
+        driver = make_uc_driver()
+        print("[DRIVER] UC OK (Render headless)", flush=True)
+        
         driver.get(url)
 
         try:
