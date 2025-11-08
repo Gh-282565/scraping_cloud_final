@@ -1,0 +1,13 @@
+2025/10/26-12:32:03.927 e24 Reusing MANIFEST C:\Users\marco\OneDrive\Desktop\scrapingcloud_251025\scraper_core\uc_profile_realtor\Default\IndexedDB\https_www.realtor.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/10/26-12:32:03.928 e24 Recovering log #289
+2025/10/26-12:32:03.931 e24 Reusing old log C:\Users\marco\OneDrive\Desktop\scrapingcloud_251025\scraper_core\uc_profile_realtor\Default\IndexedDB\https_www.realtor.com_0.indexeddb.leveldb/000289.log 
+2025/10/26-12:32:11.083 fe0 Level-0 table #293: started
+2025/10/26-12:32:11.114 fe0 Level-0 table #293: 1657738 bytes OK
+2025/10/26-12:32:11.117 fe0 Delete type=0 #289
+2025/10/26-12:32:11.118 e24 Manual compaction at level-0 from '\x00Z\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00[\x00\x00\x00' @ 0 : 0; will stop at '\x00Y\x00\x00\x05' @ 28849 : 1
+2025/10/26-12:32:11.118 e24 Compacting 2@0 + 1@1 files
+2025/10/26-12:32:11.131 e24 Generated table #294@0: 2098 keys, 127795 bytes
+2025/10/26-12:32:11.131 e24 Compacted 2@0 + 1@1 files => 127795 bytes
+2025/10/26-12:32:11.134 e24 compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/10/26-12:32:11.135 e24 Delete type=2 #293
+2025/10/26-12:32:11.137 e24 Manual compaction at level-0 from '\x00Y\x00\x00\x05' @ 28849 : 1 .. '\x00[\x00\x00\x00' @ 0 : 0; will stop at (end)

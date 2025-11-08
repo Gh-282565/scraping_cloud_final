@@ -1,0 +1,18 @@
+/*************************************************************************
+* ADOBE CONFIDENTIAL
+* ___________________
+*
+*  Copyright 2015 Adobe Systems Incorporated
+*  All Rights Reserved.
+*
+* NOTICE:  All information contained herein is, and remains
+* the property of Adobe Systems Incorporated and its suppliers,
+* if any.  The intellectual and technical concepts contained
+* herein are proprietary to Adobe Systems Incorporated and its
+* suppliers and are protected by all applicable intellectual property laws,
+* including trade secret and or copyright laws.
+* Dissemination of this information or reproduction of this material
+* is strictly forbidden unless prior written permission is obtained
+* from Adobe Systems Incorporated.
+**************************************************************************/
+import{dcLocalStorage as e}from"../../../common/local-storage.js";import{LOCAL_FILE_PERMISSION_URL as o,ONE_DAY_IN_MS as t}from"../../../common/constant.js";import{events as r}from"../../../common/analytics.js";import{util as n}from"../../js/content-util.js";import{loggingApi as a}from"../../../common/loggingApi.js";import{fetchCombinationOfLocalFilePromptCooldownConfig as i,fetchLocalFileAccessAndSummaryCoachmarkCooldownConfig as c}from"../../../common/util.js";import{CACHE_PURGE_SCHEME as l}from"../../../sw_modules/constant.js";const s="Error in Local File Prompt";async function m(){try{n.translateElements(".translate"),await e.init();const o=document.getElementById("local-file-animated-fte");if(o){const t=e.getItem("appLocale")||chrome.i18n.getMessage("@@ui_locale");o.style.backgroundImage=`url(../../images/LocalizedFte/${t}/fte_old.svg),url(../../images/LocalizedFte/en_US/fte_old.svg)`}else a.error({message:s+"initialize: FTE element not found"});const t=document.getElementById("localFileBlockingPageOpenInChrome"),r=document.getElementById("localFilePromptContinueButton");t.addEventListener("click",d),r.addEventListener("click",u)}catch(e){a.error({message:s,error:`initialize: Error in initialization: ${e}`})}}function d(){try{n.sendAnalytics(r.LOCAL_FILE_OPEN_IN_CHROME_CLICKED),window.history.back()}catch(e){a.error({message:s,error:`handleOpenFileInChromeClick: Error in openInChrome button click handler: ${e}`})}}function g(o){try{let r=e.getItem("localFileConfig");r||(r={promptCount:1}),r.eligibleDate=function(e){const o=Number(e?.settingsCoolDown);return Number.isNaN(o)&&a.error({message:s,error:`_getLocalFilePromptCooldown: cooldownConfig.settingsCoolDown must be a valid number: ${e?.settingsCoolDown}`}),new Date(Date.now()+o*t).toISOString()}(o),e.setItem("localFileConfig",r)}catch(e){a.error({message:s,error:`_updateLocalFilePromptCooldown: Error updating local file blocking UI cooldown: ${e}`})}}async function u(){try{n.sendAnalytics(r.LOCAL_FTE_GO_TO_SETTINGS_CLICKED);if(await chrome.runtime.sendMessage({main_op:"getFloodgateFlag",flag:"dc-cv-combination-of-local-file-prompt",cachePurge:l.NO_CALL})){g(await i())}if(await chrome.runtime.sendMessage({main_op:"getFloodgateFlag",flag:"dc-cv-local-file-access-and-summary-coachmark",cachePurge:l.NO_CALL})){g(await c())}chrome.tabs.create({url:o},o=>{chrome.runtime.lastError?a.error({message:s,error:"handleSwitchToAcrobatClick: Error creating tab"}):(e.setItem("settingsWindow",{id:o.id}),window.history.back())})}catch(e){a.error({message:s,error:`handleSwitchToAcrobatClick: Error in switchToAcrobat button click handler: ${e}`})}}"loading"===document.readyState?document.addEventListener("DOMContentLoaded",m):m();

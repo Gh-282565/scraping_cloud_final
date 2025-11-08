@@ -1,0 +1,20 @@
+2025/10/26-12:17:00.177 47fc Reusing MANIFEST C:\Users\marco\OneDrive\Desktop\scrapingcloud_251025\scraper_core\uc_profile_realtor\Default\IndexedDB\https_www.realtor.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/10/26-12:17:00.177 47fc Recovering log #282
+2025/10/26-12:17:00.178 47fc Reusing old log C:\Users\marco\OneDrive\Desktop\scrapingcloud_251025\scraper_core\uc_profile_realtor\Default\IndexedDB\https_www.realtor.com_0.indexeddb.leveldb/000282.log 
+2025/10/26-12:17:00.179 47fc Delete type=2 #278
+2025/10/26-12:17:00.179 47fc Delete type=2 #281
+2025/10/26-12:17:07.641 1b70 Level-0 table #287: started
+2025/10/26-12:17:07.704 1b70 Level-0 table #287: 878534 bytes OK
+2025/10/26-12:17:07.708 1b70 Delete type=0 #282
+2025/10/26-12:17:07.708 47fc Manual compaction at level-0 from '\x00X\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00Y\x00\x00\x00' @ 0 : 0; will stop at '\x00X\x00\x00\x05' @ 28833 : 1
+2025/10/26-12:17:07.709 47fc Compacting 1@0 + 1@1 files
+2025/10/26-12:17:07.715 47fc Generated table #288@0: 1254 keys, 65193 bytes
+2025/10/26-12:17:07.715 47fc Compacted 1@0 + 1@1 files => 65193 bytes
+2025/10/26-12:17:07.718 47fc compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/10/26-12:17:07.718 47fc Delete type=2 #287
+2025/10/26-12:17:07.720 47fc Manual compaction at level-0 from '\x00X\x00\x00\x05' @ 28833 : 1 .. '\x00Y\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/10/26-12:17:07.860 47fc Manual compaction at level-0 from '\x00Y\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00Z\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/10/26-12:17:23.317 2c7c Level-0 table #290: started
+2025/10/26-12:17:23.386 2c7c Level-0 table #290: 3390155 bytes OK
+2025/10/26-12:17:23.389 2c7c Delete type=2 #284
+2025/10/26-12:17:23.389 2c7c Delete type=0 #286

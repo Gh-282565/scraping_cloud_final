@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: scraping-cloud
+    env: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: PYTHONWARNINGS
+        value: "ignore"
+    # Health check (Flask index)
+    healthCheckPath: /
+    # Region can be set here if needed, e.g., frankfurt
+    # region: frankfurt

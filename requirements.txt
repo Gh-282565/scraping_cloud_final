@@ -1,0 +1,14 @@
+# Web
+Flask==3.0.3
+gunicorn==23.0.0
+
+# Scraping stack
+undetected-chromedriver==3.5.5
+selenium==4.23.1
+
+# Data stack
+pandas==2.2.2
+openpyxl==3.1.5
+
+# Utils
+python-dateutil==2.9.0.post0

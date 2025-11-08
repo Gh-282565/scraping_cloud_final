@@ -1,0 +1,138 @@
+/* Layout base */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: #f3f4f6; /* grigio chiaro */
+  color: #111827;
+}
+
+/* Card container */
+.container {
+  max-width: 900px;
+  margin: 40px auto;
+  background: #ffffff;
+  padding: 28px;
+  border-radius: 16px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+}
+
+/* Logo + titolo */
+.logo {
+  height: 48px;
+  vertical-align: middle;
+  margin-right: 12px;
+}
+h1 {
+  display: inline-block;
+  font-size: 24px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+/* Form */
+form { margin-top: 24px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+  align-items: center;
+  background: #f8fafc;           /* pannellino grigio molto chiaro */
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e7eb;
+}
+
+.form-row label {
+  font-weight: 600;
+  color: #374151;
+}
+
+select, input[type="number"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+}
+select:focus, input[type="number"]:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96,165,250,0.25);
+}
+
+/* Coppia min/max */
+.input-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* Checkbox in riga */
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+/* Bottoni in basso centrati */
+.buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.run-btn, .reset-btn, .download-btn {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
+}
+.run-btn {
+  background: #2563eb;
+  color: #fff;
+}
+.run-btn:hover { filter: brightness(1.05); }
+.reset-btn {
+  background: #e5e7eb;
+  color: #111827;
+}
+.reset-btn:hover { filter: brightness(0.98); }
+
+/* Messaggi */
+.message {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-left: 4px solid #60a5fa;
+  background: #eff6ff;
+  border-radius: 8px;
+}
+.download {
+  margin-top: 16px;
+  text-align: center;
+}
+.download-btn {
+  background: #059669;
+  color: #fff;
+}
+.download-btn:hover { filter: brightness(1.05); }
+
+/* Mobile */
+@media (max-width: 640px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
