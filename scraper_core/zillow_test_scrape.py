@@ -167,7 +167,7 @@ def collect_rows_via_cards(driver) -> List[Row]:
     return out
 
 def scrape(url: str) -> List[Row]:
-    # Monkeypatch to suppress noisy __del__ WinError 6 on teardown
+    # Evita rumorosi __del__ su teardown (ok se fallisce)
     try:
         uc.Chrome.__del__ = lambda self: None  # type: ignore
     except Exception:
@@ -175,52 +175,39 @@ def scrape(url: str) -> List[Row]:
 
     driver = None
     try:
-        chrome_options = uc.ChromeOptions()
-        chrome_options.add_argument("--no-first-run")
-        chrome_options.add_argument("--no-service-autorun")
-        chrome_options.add_argument("--password-store=basic")
-        # chrome_options.add_argument("--headless=new")  # opzionale
-
+        # Driver headless robusto (usa la factory che abbiamo creato)
         driver = make_uc_driver()
         print("[DRIVER] UC OK (Render headless)", flush=True)
-        
+
+        # Navigazione con timeout non bloccante
         print(f"[ZTS] Navigating to {url}", flush=True)
-try:
-    driver.get(url)
-except TimeoutException:
-    print("[ZTS][WARN] driver.get timeout; continuo con page_source parziale", flush=True)
+        try:
+            driver.get(url)
+        except TimeoutException:
+            print("[ZTS][WARN] driver.get timeout; continuo con page_source parziale", flush=True)
 
-# prova ad attendere il JSON, ma senza bloccare
-try:
-    WebDriverWait(driver, 15).until(
-        EC.presence_of_element_located((By.XPATH, "//script[@id='__NEXT_DATA__']"))
-    )
-except Exception:
-    time.sleep(3)
+        # Attendi il JSON se arriva, altrimenti prosegui
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//script[@id='__NEXT_DATA__']"))
+            )
+        except Exception:
+            time.sleep(3)
 
-html = driver.page_source or ""
-payload = extract_next_data(html)
-rows = collect_rows_from_payload(payload) if payload else []
-
-if not rows:
-    print("[ZTS] Fallback: scanning cards", flush=True)
-    rows = collect_rows_via_cards(driver)
-
-rows = [r for r in rows if (r.price or r.acres)]
-print(f"[ZTS] scrape complete, found {len(rows)} results", flush=True)
-return rows
-
-
-        html = driver.page_source
+        html = driver.page_source or ""
         payload = extract_next_data(html)
         rows = collect_rows_from_payload(payload) if payload else []
 
         if not rows:
+            print("[ZTS] Fallback: scanning cards", flush=True)
             rows = collect_rows_via_cards(driver)
 
         rows = [r for r in rows if (r.price or r.acres)]
+        print(f"[ZTS] scrape complete, found {len(rows)} results", flush=True)
         return rows
+
     finally:
+        # Teardown sicuro
         try:
             if driver is not None:
                 driver.quit()
