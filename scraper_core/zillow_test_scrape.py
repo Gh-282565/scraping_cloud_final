@@ -13,6 +13,7 @@ from openpyxl.workbook.defined_name import DefinedName
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 import undetected_chromedriver as uc
 from scraper_core.driver_factory import make_uc_driver
 
@@ -183,14 +184,32 @@ def scrape(url: str) -> List[Row]:
         driver = make_uc_driver()
         print("[DRIVER] UC OK (Render headless)", flush=True)
         
-        driver.get(url)
+        print(f"[ZTS] Navigating to {url}", flush=True)
+try:
+    driver.get(url)
+except TimeoutException:
+    print("[ZTS][WARN] driver.get timeout; continuo con page_source parziale", flush=True)
 
-        try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//script[@id='__NEXT_DATA__']"))
-            )
-        except Exception:
-            time.sleep(6)
+# prova ad attendere il JSON, ma senza bloccare
+try:
+    WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.XPATH, "//script[@id='__NEXT_DATA__']"))
+    )
+except Exception:
+    time.sleep(3)
+
+html = driver.page_source or ""
+payload = extract_next_data(html)
+rows = collect_rows_from_payload(payload) if payload else []
+
+if not rows:
+    print("[ZTS] Fallback: scanning cards", flush=True)
+    rows = collect_rows_via_cards(driver)
+
+rows = [r for r in rows if (r.price or r.acres)]
+print(f"[ZTS] scrape complete, found {len(rows)} results", flush=True)
+return rows
+
 
         html = driver.page_source
         payload = extract_next_data(html)
