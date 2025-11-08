@@ -1,0 +1,13 @@
+# Do not upload local caches, venvs, and large artifacts
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+results/
+*.xlsx
+*.xls
+uc_profile_*/
+logs/
+*.log
+*.zip

@@ -1,0 +1,15 @@
+﻿.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+dist/
+build/
+venv/
+.env
+results/
+ScraperWork/
+**/Cache/
+**/cache/
+**/uc_profile*/
