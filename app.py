@@ -13,6 +13,25 @@ from data_loader import load_parametri
 import pandas as pd  # ok anche se non usato; puoi rimuoverlo se vuoi
 
 app = Flask(__name__)
+# --- Diagnostica Chrome UC in container ---
+from scraper_core.driver_factory import make_uc_driver
+
+@app.get("/diag/uc")
+def diag_uc():
+    try:
+        d = make_uc_driver()
+        d.get("https://example.com/")
+        title = d.title
+        d.quit()
+        return {"ok": True, "title": title}, 200
+    except Exception as e:
+        import traceback
+        return {
+            "ok": False,
+            "error": str(e),
+            "trace": traceback.format_exc().splitlines()[-5:]
+        }, 500
+
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key")
 
 # ----------------------------
