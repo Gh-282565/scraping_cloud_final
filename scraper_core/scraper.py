@@ -243,22 +243,30 @@ def run_scraping(
     )
 
     # Realtor
-    if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is not None:
-        try:
-            fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
-            if not callable(fn_r):
-                raise AttributeError("realtor_scrape non espone run_scrape/run.")
-            df_r = _to_df(fn_r(**kwargs))
-            if df_r is not None and not df_r.empty:
-                df_r = _normalize(df_r, "Realtor")
-                outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
-                _save_excel(df_r, outpath_r, "Realtor")
-                produced_paths.append(outpath_r)
-                messages.append("[OK] File Realtor creato.")
-            else:
-                messages.append("[WARN] Nessun risultato Realtor.")
-        except Exception as e:
-            messages.append(f"[ERR] Realtor: {e}")
+if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is not None:
+    try:
+        fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
+        if not callable(fn_r):
+            raise AttributeError("realtor_scrape non espone run_scrape/run.")
+
+        df_r = _to_df(fn_r(**kwargs))
+        outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
+
+        if df_r is None:
+            import pandas as pd
+            df_r = pd.DataFrame(columns=["Status"])
+
+        df_r = _normalize(df_r, "Realtor")
+
+        _save_excel(df_r, outpath_r, "Realtor")
+        produced_paths.append(outpath_r)
+        if df_r.empty:
+            messages.append("[WARN] Realtor: nessuna riga, creato file vuoto.")
+        else:
+            messages.append("[OK] File Realtor creato.")
+    except Exception as e:
+        messages.append(f"[ERR] Realtor: {e}")
+
 
     # Zillow
     if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
