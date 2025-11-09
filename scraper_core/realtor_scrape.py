@@ -3,13 +3,11 @@
 import os
 import re
 import time
-import math
 import traceback
 from datetime import datetime
 from urllib.parse import quote
 
 from .driver_factory import make_driver  # <-- stesso factory usato per Zillow
-from .excel_utils import save_realtor_results  # <-- se già usi un writer centralizzato; vedi nota in fondo
 
 ACRE_TO_SQFT = 43560
 
@@ -47,7 +45,7 @@ def build_realtor_urls(state_abbr: str, county: str, min_acres: float, max_acres
     """
     Ritorna una lista di URL da interrogare.
     Pattern robusto (valido al momento):
-      For Sale: /realestateandhomes-search/{County-County}_{STATE}/{property_type}/lot-sqft-{min}-{max}
+      For Sale: /realestateandhomes-search/{County-Name}_{STATE}/{property_type}/lot-sqft-{min}-{max}
       Sold:     stesso ma con suffisso '/sold'
     Nota: se hai bisogno di filtri aggiuntivi, appendi querystring.
     """
@@ -303,7 +301,6 @@ def scrape_realtor(county: str, state_abbr: str,
 # ---- ADAPTER per compatibilità con scraper_core/scraper.py ----
 # Mantiene la vecchia firma: run_scrape(...) -> list[dict] / DataFrame-friendly
 
-import re
 
 def _price_to_float(raw):
     if raw is None:
