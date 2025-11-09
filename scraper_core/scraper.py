@@ -222,7 +222,7 @@ def run_scraping(
     Esegue Realtor e/o Zillow e crea file separati.
     Ritorna: (lista_file_creati, messages)
     """
-        print("[RUN][SOURCES]", use_sources)
+    print("[RUN][SOURCES]", use_sources)
     messages: List[str] = []
     produced_paths: List[str] = []
 
