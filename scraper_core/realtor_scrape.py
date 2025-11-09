@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime
 from urllib.parse import quote
 
-from .driver_factory import make_driver  # <-- stesso factory usato per Zillow
+from .driver_factory import make_uc_driver as make_driver  # <-- stesso factory usato per Zillow
 
 ACRE_TO_SQFT = 43560
 
