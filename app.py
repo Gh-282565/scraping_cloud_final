@@ -199,7 +199,14 @@ def run():
             flash("Seleziona almeno una fonte (Realtor o Zillow).", "error")
             return redirect(url_for("index"))
 
-               # Avvia scraping reale (robusto allo spacchettamento)
+        # 🔁 usa sempre la versione aggiornata dell’orchestratore
+        try:
+            run_scraping = _get_run_scraping()
+        except Exception as e:
+            flash(f"[ERR] impossibile caricare l'orchestratore: {e}", "error")
+            return redirect(url_for("index"))
+
+        # Avvia scraping reale (robusto allo spacchettamento)
         outpaths, messages = [], []
         try:
             out = run_scraping(
@@ -228,7 +235,8 @@ def run():
 
         except Exception as e:
             messages = [f"[ERR] {e}"]
-
+   
+        
             # Messaggi utente: mostra solo eventuali errori
         for msg in messages:
             if "ERR" in msg or "Errore" in msg:
