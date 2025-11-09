@@ -223,6 +223,7 @@ def run_scraping(
     Ritorna: (lista_file_creati, messages)
     """
     print("[RUN][SOURCES]", use_sources)
+
     messages: List[str] = []
     produced_paths: List[str] = []
 
@@ -242,33 +243,36 @@ def run_scraping(
         period=period,
     )
 
-    # Realtor
-if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is not None:
-    try:
-        fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
-        if not callable(fn_r):
-            raise AttributeError("realtor_scrape non espone run_scrape/run.")
+    # -----------------------------
+    # Realtor (always-write)
+    # -----------------------------
+    if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is not None:
+        try:
+            fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
+            if not callable(fn_r):
+                raise AttributeError("realtor_scrape non espone run_scrape/run.")
 
-        df_r = _to_df(fn_r(**kwargs))
-        outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
+            df_r = _to_df(fn_r(**kwargs))
+            outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
 
-        if df_r is None:
-            import pandas as pd
-            df_r = pd.DataFrame(columns=["Status"])
+            if df_r is None:
+                import pandas as pd
+                df_r = pd.DataFrame(columns=["Status"])
 
-        df_r = _normalize(df_r, "Realtor")
+            df_r = _normalize(df_r, "Realtor")
+            _save_excel(df_r, outpath_r, "Realtor")
+            produced_paths.append(outpath_r)
 
-        _save_excel(df_r, outpath_r, "Realtor")
-        produced_paths.append(outpath_r)
-        if df_r.empty:
-            messages.append("[WARN] Realtor: nessuna riga, creato file vuoto.")
-        else:
-            messages.append("[OK] File Realtor creato.")
-    except Exception as e:
-        messages.append(f"[ERR] Realtor: {e}")
+            if df_r.empty:
+                messages.append("[WARN] Realtor: nessuna riga, creato file vuoto.")
+            else:
+                messages.append("[OK] File Realtor creato.")
+        except Exception as e:
+            messages.append(f"[ERR] Realtor: {e}")
 
-
-    # Zillow
+    # -----------------------------
+    # Zillow (come prima)
+    # -----------------------------
     if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
         try:
             fn_z = getattr(zillow_scrape, "run_scrape", None) or getattr(zillow_scrape, "run", None)
@@ -289,3 +293,4 @@ if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is n
     if not produced_paths:
         messages.append("[WARN] Nessun file generato.")
     return produced_paths, messages
+
