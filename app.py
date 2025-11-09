@@ -199,24 +199,37 @@ def run():
             flash("Seleziona almeno una fonte (Realtor o Zillow).", "error")
             return redirect(url_for("index"))
 
-        # 🔁 usa sempre la versione aggiornata dell’orchestratore
-        run_scraping = _get_run_scraping()
+               # Avvia scraping reale (robusto allo spacchettamento)
+        outpaths, messages = [], []
+        try:
+            out = run_scraping(
+                state=state,
+                county=county,
+                acres_min=acres_min,
+                acres_max=acres_max,
+                include_forsale=include_forsale,
+                include_sold=include_sold,
+                use_sources=sources,
+                headless=headless,
+                period=period
+                # results_dir=RESULTS_DIR  # abilita se il tuo orchestratore lo supporta
+            )
 
-        # Avvia scraping reale
-        outpaths, messages = run_scraping(
-            state=state,
-            county=county,
-            acres_min=acres_min,
-            acres_max=acres_max,
-            include_forsale=include_forsale,
-            include_sold=include_sold,
-            use_sources=sources,
-            headless=headless,
-            period=period
-            # NOTA: se il tuo orchestratore accetta results_dir=RESULTS_DIR, puoi passarlo qui
-        )
+            if isinstance(out, tuple) and len(out) == 2:
+                outpaths, messages = out
+            elif isinstance(out, dict):
+                outpaths, messages = out, []
+            elif isinstance(out, (list, tuple)):
+                outpaths, messages = list(out), []
+            elif out is None:
+                messages = ["[ERR] run_scraping ha restituito None"]
+            else:
+                messages = [f"[ERR] run_scraping tipo inatteso: {type(out).__name__}"]
 
-        # Messaggi utente: mostra solo eventuali errori
+        except Exception as e:
+            messages = [f"[ERR] {e}"]
+
+            # Messaggi utente: mostra solo eventuali errori
         for msg in messages:
             if "ERR" in msg or "Errore" in msg:
                 flash(msg, "error")
