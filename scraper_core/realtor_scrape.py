@@ -77,7 +77,7 @@ def _click_cookie_consent(driver, log):
         "button[aria-label='Accept all']",
         "button[aria-label='Agree']",
         "button:contains('Accept')",  # pseudo, ma alcune librerie lo gestiscono; UC no -> skip silenzioso
-        "button[ data-testid='trust-accept']",
+        "button[data-testid='trust-accept']",
     ]
     for css in candidates:
         try:
@@ -300,3 +300,64 @@ def scrape_realtor(county: str, state_abbr: str,
                 driver.quit()
         except:
             pass
+# ---- ADAPTER per compatibilità con scraper_core/scraper.py ----
+# Mantiene la vecchia firma: run_scrape(...) -> list[dict] / DataFrame-friendly
+
+import re
+
+def _price_to_float(raw):
+    if raw is None:
+        return None
+    s = str(raw)
+    # rimuove $ , spazi ecc. mantenendo solo cifre e punto
+    s = re.sub(r"[^\d.]", "", s)
+    try:
+        return float(s) if s else None
+    except:
+        return None
+
+def run_scrape(
+    *,
+    state: str,
+    county: str,
+    acres_min: float = 0,
+    acres_max: float = 0,
+    include_forsale: bool = True,
+    include_sold: bool = False,
+    headless: bool = True,
+    period: str | None = None,
+    logger=print,
+    **kwargs
+):
+    """
+    Adapter per lo scraper orchestrator.
+    Ritorna una lista di record (ForSale+Sold) con colonne compatibili:
+    State, County, Status, Price, Acres, Price_per_Acre, Link
+    """
+    res = scrape_realtor(
+        county=county,
+        state_abbr=state,
+        min_acres=acres_min,
+        max_acres=acres_max,
+        include_for_sale=include_forsale,
+        include_sold=include_sold,
+        logger=logger
+    )
+
+    rows = []
+    for bucket, items in (res or {}).items():
+        status = "for sale" if bucket == "for_sale" else "sold"
+        for it in items or []:
+            price_num = _price_to_float(it.get("price"))
+            acres = it.get("acres")
+            ppa = (price_num / acres) if (price_num is not None and acres not in (None, 0, 0.0)) else None
+            rows.append({
+                "State": state,
+                "County": county,
+                "Status": status,
+                "Price": price_num,          # numerico per i tuoi calcoli
+                "Acres": acres,
+                "Price_per_Acre": ppa,
+                "Link": it.get("link", "")
+            })
+    return rows
