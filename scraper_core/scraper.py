@@ -269,28 +269,35 @@ def run_scraping(
                 messages.append("[OK] File Realtor creato.")
         except Exception as e:
             messages.append(f"[ERR] Realtor: {e}")
-
     # -----------------------------
-    # Zillow (come prima)
+    # Zillow (indipendente da Realtor)
     # -----------------------------
-    if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
-        try:
+    try:
+        if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
+            print("[RUN] Zillow: start")
             fn_z = getattr(zillow_scrape, "run_scrape", None) or getattr(zillow_scrape, "run", None)
             if not callable(fn_z):
                 raise AttributeError("zillow_scrape non espone run_scrape/run.")
-            df_z = _to_df(fn_z(**kwargs))
-            if df_z is not None and not df_z.empty:
-                df_z = _normalize(df_z, "Zillow")
-                outpath_z = os.path.join(results_dir, f"zillow_risultati_estrazione_{tag}.xlsx")
-                _save_excel(df_z, outpath_z, "Zillow")
-                produced_paths.append(outpath_z)
-                messages.append("[OK] File Zillow creato.")
-            else:
-                messages.append("[WARN] Nessun risultato Zillow.")
-        except Exception as e:
-            messages.append(f"[ERR] Zillow: {e}")
 
-    if not produced_paths:
-        messages.append("[WARN] Nessun file generato.")
-    return produced_paths, messages
+            df_z = _to_df(fn_z(**kwargs))
+            if df_z is None:
+                import pandas as pd
+                df_z = pd.DataFrame(columns=["Status"])
+
+            if not df_z.empty:
+                df_z = _normalize(df_z, "Zillow")
+            outpath_z = os.path.join(results_dir, f"zillow_risultati_estrazione_{tag}.xlsx")
+            _save_excel(df_z, outpath_z, "Zillow")
+            produced_paths.append(outpath_z)
+
+            if df_z.empty:
+                messages.append("[WARN] Zillow: nessuna riga, creato file vuoto.")
+            else:
+                messages.append("[OK] File Zillow creato.")
+        else:
+            print("[RUN] Zillow: skipped (not in sources or module missing)")
+    except Exception as e:
+        messages.append(f"[ERR] Zillow: {e}")
+
+
 
