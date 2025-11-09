@@ -15,7 +15,9 @@ import pandas as pd
 
 try:
     from . import realtor_scrape
-except Exception:
+    print("[IMPORT] realtor_scrape OK ->", getattr(realtor_scrape, "__file__", "?"))
+except Exception as e:
+    print("[IMPORT][ERR] realtor_scrape:", e)
     realtor_scrape = None
 
 try:
