@@ -15,9 +15,7 @@ import pandas as pd
 
 try:
     from . import realtor_scrape
-    print("[IMPORT] realtor_scrape OK ->", getattr(realtor_scrape, "__file__", "?"))
-except Exception as e:
-    print("[IMPORT][ERR] realtor_scrape:", e)
+except Exception:
     realtor_scrape = None
 
 try:
@@ -222,8 +220,6 @@ def run_scraping(
     Esegue Realtor e/o Zillow e crea file separati.
     Ritorna: (lista_file_creati, messages)
     """
-    print("[RUN][SOURCES]", use_sources)
-
     messages: List[str] = []
     produced_paths: List[str] = []
 
@@ -243,61 +239,45 @@ def run_scraping(
         period=period,
     )
 
-    # -----------------------------
-    # Realtor (always-write)
-    # -----------------------------
+    # Realtor
     if "realtor" in [s.lower() for s in (use_sources or [])] and realtor_scrape is not None:
         try:
             fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
             if not callable(fn_r):
                 raise AttributeError("realtor_scrape non espone run_scrape/run.")
-
             df_r = _to_df(fn_r(**kwargs))
-            outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
-
-            if df_r is None:
-                import pandas as pd
-                df_r = pd.DataFrame(columns=["Status"])
-
-            df_r = _normalize(df_r, "Realtor")
-            _save_excel(df_r, outpath_r, "Realtor")
-            produced_paths.append(outpath_r)
-
-            if df_r.empty:
-                messages.append("[WARN] Realtor: nessuna riga, creato file vuoto.")
-            else:
+            if df_r is not None and not df_r.empty:
+                df_r = _normalize(df_r, "Realtor")
+                outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
+                _save_excel(df_r, outpath_r, "Realtor")
+                produced_paths.append(outpath_r)
                 messages.append("[OK] File Realtor creato.")
+            else:
+                messages.append("[WARN] Nessun risultato Realtor.")
         except Exception as e:
             messages.append(f"[ERR] Realtor: {e}")
-    # -----------------------------
-    # Zillow (indipendente da Realtor)
-    # -----------------------------
-    try:
-        if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
-            print("[RUN] Zillow: start")
+
+    # Zillow
+    if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
+        try:
             fn_z = getattr(zillow_scrape, "run_scrape", None) or getattr(zillow_scrape, "run", None)
             if not callable(fn_z):
                 raise AttributeError("zillow_scrape non espone run_scrape/run.")
-
             df_z = _to_df(fn_z(**kwargs))
-            if df_z is None:
-                import pandas as pd
-                df_z = pd.DataFrame(columns=["Status"])
-
-            if not df_z.empty:
+            if df_z is not None and not df_z.empty:
                 df_z = _normalize(df_z, "Zillow")
-            outpath_z = os.path.join(results_dir, f"zillow_risultati_estrazione_{tag}.xlsx")
-            _save_excel(df_z, outpath_z, "Zillow")
-            produced_paths.append(outpath_z)
-
-            if df_z.empty:
-                messages.append("[WARN] Zillow: nessuna riga, creato file vuoto.")
-            else:
+                outpath_z = os.path.join(results_dir, f"zillow_risultati_estrazione_{tag}.xlsx")
+                _save_excel(df_z, outpath_z, "Zillow")
+                produced_paths.append(outpath_z)
                 messages.append("[OK] File Zillow creato.")
-        else:
-            print("[RUN] Zillow: skipped (not in sources or module missing)")
-    except Exception as e:
-        messages.append(f"[ERR] Zillow: {e}")
+            else:
+                messages.append("[WARN] Nessun risultato Zillow.")
+        except Exception as e:
+            messages.append(f"[ERR] Zillow: {e}")
+
+    if not produced_paths:
+        messages.append("[WARN] Nessun file generato.")
+    return produced_paths, messages
 
 
 
