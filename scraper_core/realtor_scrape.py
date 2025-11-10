@@ -137,7 +137,7 @@ def _click_cookie_consent(driver):
             pass
     return False
 
-def _wait_for_results(driver, timeout=20):
+def _wait_for_results(driver, timeout=25):
     start = time.time()
     while time.time() - start < timeout:
         # CSS moderni
