@@ -71,36 +71,6 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 def log(*a):
     print(*a, flush=True)
-def _click_cookie_consent(driver):
-    # tenta selettori comuni OneTrust/ARIA
-    candidates = [
-        "button#onetrust-accept-btn-handler",
-        "button[aria-label='Accept']",
-        "button[aria-label='Accept All']",
-        "button[aria-label='Agree']",
-        "[data-testid='accept-consent']",
-        "button[aria-label*='accept']",
-        "button[aria-label*='consent']",
-    ]
-    for css in candidates:
-        try:
-            els = driver.find_elements(By.CSS_SELECTOR, css)
-            if els:
-                els[0].click()
-                time.sleep(0.5)
-                return True
-        except Exception:
-            pass
-    # spesso c'è una X per chiudere l’overlay
-    try:
-        xs = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close'], button[aria-label='Dismiss']")
-        if xs:
-            xs[0].click()
-            time.sleep(0.3)
-            return True
-    except Exception:
-        pass
-    return False
 
 def _build_fast_uc_driver():
     uc, ChromeOptions = _import_uc()
@@ -387,8 +357,28 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
         log("[URL]", url)
 
         driver.get(url)
-        time.sleep(2)
-        _click_cookie_consent(driver)
+time.sleep(2)
+
+# DIAGNOSTICA
+try:
+    _snapshot(driver, "after_get")
+except Exception:
+    pass
+
+clicked = _click_cookie_consent(driver)
+print(f"[CONSENT] clicked={clicked}", flush=True)
+
+try:
+    _snapshot(driver, "after_consent")
+except Exception:
+    pass
+
+# Scroll corto, attesa, scroll profondo
+_progressive_scroll(driver, steps=2, pause=0.7)
+if not _wait_for_results(driver, timeout=25):  # <-- 25s
+    log("[WAIT] Nessun indicatore risultati; continuo con scroll profondo.")
+_progressive_scroll(driver, steps=8, pause=0.7)
+)
 
         # Scroll corto, attesa, scroll profondo
         _progressive_scroll(driver, steps=2, pause=0.7)
