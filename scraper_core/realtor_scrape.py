@@ -373,3 +373,83 @@ if __name__ == "__main__":
         print(f"[OK] Salvato: {out}")
     else:
         print("Uso: python today_realtor_scrape_PATCH_FAST.py <STATE> <County Name> <min acres> <max acres> <forsale|sold>")
+# --- WRAPPER per orchestratore GUI: espone run_scrape() come da contratto ---
+
+import re
+import pandas as pd
+
+def _num(x):
+    try:
+        return float(re.sub(r"[^0-9.\-]", "", str(x)))
+    except Exception:
+        return None
+
+def _to_df(listings, *, state, county, status_label, period):
+    """
+    listings: lista di dict come {"title","price","acres","link","status"}
+    Ritorna DF con colonne standard attese dalla GUI:
+    Price, Acres, Price_per_Acre, Location, Link, Status, County, State, Period
+    """
+    rows = []
+    for r in listings:
+        price_txt = r.get("price")
+        acres_txt = r.get("acres")
+        link = r.get("link")
+        loc = r.get("title") or r.get("location") or ""
+        price_num = _num(price_txt)
+        acres_num = _num(acres_txt)
+        ppa = (price_num / acres_num) if (price_num and acres_num and acres_num > 0) else None
+        # format prezzo in USD se numerico
+        price_fmt = f"${price_num:,.0f}" if price_num is not None else (price_txt or "")
+        rows.append({
+            "Price": price_fmt,
+            "Acres": acres_num,
+            "Price_per_Acre": ppa,
+            "Location": loc,
+            "Link": link,
+            "Status": status_label,
+            "County": county,
+            "State": state,
+            "Period": period or ""
+        })
+    return pd.DataFrame(rows, columns=[
+        "Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"
+    ])
+
+def run_scrape(
+    *,
+    state: str,
+    county: str,
+    acres_min: int,
+    acres_max: int,
+    include_forsale: bool,
+    include_sold: bool,
+    headless: bool = True,   # ignorato: il driver interno è già headless/new
+    period: str | None = None,
+) -> pd.DataFrame:
+    """
+    Entry-point richiesto dalla GUI.
+    Chiama lo scraper interno 'scrape_realtor' una o due volte e unisce i risultati in un unico DataFrame.
+    """
+    print("[REALTOR][VER] run_scrape wrapper attivo", flush=True)
+
+    parts = []
+
+    # For Sale
+    if include_forsale:
+        listings_fs = scrape_realtor(RealtorParams(
+            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=False
+        ))
+        parts.append(_to_df(listings_fs, state=state, county=county, status_label="For Sale", period=period))
+
+    # Sold
+    if include_sold:
+        listings_sd = scrape_realtor(RealtorParams(
+            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=True
+        ))
+        parts.append(_to_df(listings_sd, state=state, county=county, status_label="Sold", period=period))
+
+    if not parts:
+        return pd.DataFrame(columns=["Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"])
+
+    return pd.concat(parts, ignore_index=True)
