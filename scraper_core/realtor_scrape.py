@@ -2,7 +2,33 @@
 # Drop-in per testare Realtor con lo STESSO approccio driver dell'ambiente test (UC FAST MODE)
 # Toggle via env: REALTOR_FAST=1 (default) => usa driver locale UC ottimizzato
 #                   REALTOR_FAST=0         => delega a driver_factory.get_driver() (condiviso con Zillow)
-#
+# PATCH 1: robust consent click (iframe-aware)
+def _click_cookie_consent(driver):
+    try:
+        driver.implicitly_wait(2)
+        iframes = driver.find_elements("tag name", "iframe")
+        for f in iframes:
+            try:
+                driver.switch_to.frame(f)
+                btns = driver.find_elements("xpath", "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]")
+                if btns:
+                    btns[0].click()
+                    driver.switch_to.default_content()
+                    print("[CONSENT] Clicked inside iframe")
+                    return True
+                driver.switch_to.default_content()
+            except Exception:
+                driver.switch_to.default_content()
+        # fallback on main doc
+        btns = driver.find_elements("xpath", "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]")
+        if btns:
+            btns[0].click()
+            print("[CONSENT] Clicked on main doc")
+            return True
+    except Exception as e:
+        print("[CONSENT] No banner or failed:", e)
+    driver.switch_to.default_content()
+    return False
 # Funzioni chiave:
 # - _build_fast_uc_driver(): riprende le ottimizzazioni del vecchio ambiente test (pageLoadStrategy=eager, immagini OFF, headless)
 # - _wait_for_results(): attesa tollerante (CSS + XPATH legacy)
@@ -137,37 +163,29 @@ def _click_cookie_consent(driver):
             pass
     return False
 
+# PATCH 2: extended wait and diagnostic snapshots
+import os, time
+from datetime import datetime
+
+def _snapshot(driver, tag):
+    try:
+        os.makedirs("/app/results/snapshots", exist_ok=True)
+        fn = f"/app/results/snapshots/realtor_{tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        with open(fn, "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        print(f"[SNAP] Saved {fn}")
+    except Exception as e:
+        print("[SNAP] Error saving snapshot:", e)
+
 def _wait_for_results(driver, timeout=25):
-    start = time.time()
-    while time.time() - start < timeout:
-        # CSS moderni
-        cards = driver.find_elements(By.CSS_SELECTOR,
-            "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='card']")
-        if cards:
-            return True
-
-        # Contatori/indicatori
-        counts = driver.find_elements(By.CSS_SELECTOR, "[data-testid='search-result-count'], span[class*='results']")
-        if counts:
-            return True
-
-        # XPATH legacy (robusti)
-        xp_any = [
-            "//li[contains(@class,'component_property-card')]",
-            "//div[contains(@data-testid,'property-card')]",
-            "//li[.//a[contains(@href,'/realestateandhomes-detail/')]]",
-            "//a[contains(@href,'/realestateandhomes-detail/')]//ancestor::li",
-            "//a[contains(@href,'/realestateandhomes-detail/')]"
-        ]
-        for xp in xp_any:
-            try:
-                if driver.find_elements(By.XPATH, xp):
-                    return True
-            except Exception:
-                pass
-
-        time.sleep(0.5)
-    return False
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        cards = driver.find_elements(By.CSS_SELECTOR, "[data-testid='property-card']")
+        if len(cards) > 0:
+            return cards
+        time.sleep(2)
+    _snapshot(driver, "zero_results")
+    return []
 
 def _first_price(text):
     # Estrai token $xxx,xxx
