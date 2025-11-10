@@ -13,6 +13,33 @@ from data_loader import load_parametri
 import pandas as pd  # ok anche se non usato; puoi rimuoverlo se vuoi
 
 app = Flask(__name__)
+import os
+from flask import jsonify, send_from_directory, abort
+
+RESULTS_DIR = "/app/results"
+SNAP_DIR = os.path.join(RESULTS_DIR, "snapshots")
+os.makedirs(SNAP_DIR, exist_ok=True)
+
+@app.get("/results")
+def list_results():
+    # Elenco JSON dei file in /app/results e sottocartelle
+    out = []
+    for root, _, files in os.walk(RESULTS_DIR):
+        for f in files:
+            rel = os.path.relpath(os.path.join(root, f), RESULTS_DIR).replace("\\", "/")
+            out.append(rel)
+    out.sort()
+    return jsonify(out)
+
+@app.get("/results/<path:fname>")
+def download_result(fname: str):
+    # Permetti solo percorsi dentro /app/results
+    safe_root = os.path.realpath(RESULTS_DIR)
+    safe_path = os.path.realpath(os.path.join(safe_root, fname))
+    if not safe_path.startswith(safe_root):
+        return abort(403)
+    return send_from_directory(safe_root, fname, as_attachment=True)
+
 # --- Diagnostica Chrome UC in container ---
 from scraper_core.driver_factory import make_uc_driver
 
