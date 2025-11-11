@@ -53,9 +53,13 @@ USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))
 
 # Safe imports: UC è richiesto solo se USE_FAST_UC=True
 def _import_uc():
-    import undetected_chromedriver as uc
-    from selenium.webdriver.chrome.options import Options as ChromeOptions
-    return uc, ChromeOptions
+    try:
+        import undetected_chromedriver as uc
+        from selenium.webdriver.chrome.options import Options as ChromeOptions
+        return uc, ChromeOptions
+    except Exception as e:
+        print("[IMPORT][UC][ERR]", e, flush=True)
+        raise    
 
 # Fallback al driver condiviso se richiesto
 def _import_driver_factory():
