@@ -88,13 +88,19 @@ def _build_fast_uc_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1440,1200")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument("--lang=en-US,en")
+    opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    # Disabilita immagini
+    # Toggle immagini: default OFF come nel cloud-test. Metti REALTOR_IMAGES=1 su Render per abilitarle.
+    imgs_on = (os.getenv("REALTOR_IMAGES", "0") == "1")
     prefs = {
-        "profile.default_content_setting_values": {"images": 2},
-        "profile.managed_default_content_settings.images": 2
+        "profile.managed_default_content_settings.images": (1 if imgs_on else 2),
+        "profile.default_content_setting_values": {"images": (1 if imgs_on else 2)},
     }
     opts.add_experimental_option("prefs", prefs)
+    if not imgs_on:
+        opts.add_argument("--blink-settings=imagesEnabled=false")
 
     # User data dir dedicata (persistenza anti-bot soft)
     profile_dir = os.path.join(os.getcwd(), "uc_profile_realtor")
@@ -104,10 +110,56 @@ def _build_fast_uc_driver():
     driver = uc.Chrome(options=opts)
     return driver
 
+
 def _progressive_scroll(driver, steps=8, pause=0.7):
-    for i in range(steps):
-        driver.execute_script("window.scrollBy(0, document.body.scrollHeight * 0.25);")
+    """
+    Scrolla sia la finestra principale sia, se presente,
+    il contenitore dei risultati (virtual list).
+    """
+    for _ in range(steps):
+        try:
+            driver.execute_script("window.scrollBy(0, Math.floor(window.innerHeight*0.85));")
+        except Exception:
+            pass
+        # Scroll anche del container interno (virtual-list)
+        _scroll_results_container(driver, steps=1, pause=0.0)
         time.sleep(pause)
+
+
+def _scroll_results_container(driver, steps=6, pause=0.6):
+    """
+    Scrolla anche il contenitore risultati (virtual list) se presente,
+    altrimenti lo scroll di window non materializza le card.
+    """
+    js = """
+    (function(){
+      const sels = [
+        "div[data-testid='search-result-list']",
+        "ul[data-testid='results-list']",
+        "div[data-testid='results']",
+        "main ul[data-testid='results-list']"
+      ];
+      let hit = 0;
+      for (const s of sels) {
+        const el = document.querySelector(s);
+        if (el && el.scrollHeight > el.clientHeight) {
+          el.scrollTop = el.scrollTop + Math.floor(el.clientHeight*0.9);
+          el.dispatchEvent(new Event('scroll'));
+          hit++;
+        }
+      }
+      window.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('resize'));
+      return hit;
+    })();
+    """
+    for _ in range(steps):
+        try:
+            driver.execute_script(js)
+        except Exception:
+            pass
+        time.sleep(pause)
+
 
 # PATCH 2: extended wait and diagnostic snapshots
 import os, time
