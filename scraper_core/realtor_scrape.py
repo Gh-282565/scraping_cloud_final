@@ -450,7 +450,10 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
             if not _wait_for_results(driver, timeout=40):
                 _snapshot(driver, "zero_results")
                 return []
-
+                
+        # ⚠️ satura la virtual-list PRIMA del parsing
+        _deep_fill_results(driver, cycles=6)
+        
         # scroll profondo per far materializzare tutte le card lazy
         _progressive_scroll(driver, steps=8, pause=0.7)
         # --- DIAGNOSTICA SELETTORI CARD (prima del parsing) ---
