@@ -120,14 +120,25 @@ def _snapshot(driver, tag):
         print("[SNAP] Error saving snapshot:", e)
 
 def _wait_for_results(driver, timeout=25):
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        cards = driver.find_elements(By.CSS_SELECTOR, "[data-testid='property-card']")
-        if len(cards) > 0:
-            return cards
-        time.sleep(2)
-    _snapshot(driver, "zero_results")
-    return []
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    SELECTORS = [
+        "article[data-testid='property-card']",
+        "section[data-testid='property-card']",
+        "div[data-testid='property-card']",
+        "li[data-testid='result-card'] article",
+        "ul[data-testid='results-list'] article",
+        "div[data-testid='search-result-list'] article",
+        "div[class^='BasePropertyCard_propertyCardWrap__'] article",
+    ]
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda d: any(d.find_elements(By.CSS_SELECTOR, s) for s in SELECTORS)
+        )
+        return True
+    except Exception:
+        return False
 
 def _first_price(text):
     # Estrai token $xxx,xxx
@@ -152,6 +163,35 @@ def _parse_acres_from_text(text):
     return ""
 
 def _extract_listings(driver):
+        from selenium.webdriver.common.by import By
+
+    SELECTORS = [
+        "article[data-testid='property-card']",
+        "section[data-testid='property-card']",
+        "div[data-testid='property-card']",
+        "li[data-testid='result-card'] article",
+        "ul[data-testid='results-list'] article",
+        "div[data-testid='search-result-list'] article",
+        "div[class^='BasePropertyCard_propertyCardWrap__'] article",
+    ]
+
+    cards = []
+    for s in SELECTORS:
+        els = driver.find_elements(By.CSS_SELECTOR, s)
+        if els:
+            cards.extend(els)
+
+    # deduplica
+    cards = list(dict.fromkeys(cards))
+    log(f"[PARSE] Card trovate (unione selettori): {len(cards)}")
+
+    # ⬇️ qui continua normalmente il tuo codice di parsing
+    # ad esempio:
+    # results = []
+    # for card in cards:
+    #     ... estrai titolo, prezzo, link ecc. ...
+    # return results
+
     listings = []
 
     # Primo tentativo: CSS moderni
@@ -355,6 +395,30 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
 
         # scroll profondo per far materializzare tutte le card lazy
         _progressive_scroll(driver, steps=8, pause=0.7)
+        # --- DIAGNOSTICA SELETTORI CARD (prima del parsing) ---
+        from selenium.webdriver.common.by import By
+        SELECTORS = [
+            "article[data-testid='property-card']",
+            "section[data-testid='property-card']",
+            "div[data-testid='property-card']",
+            "li[data-testid='result-card'] article",
+            "ul[data-testid='results-list'] article",
+            "div[data-testid='search-result-list'] article",
+            "div[class^='BasePropertyCard_propertyCardWrap__'] article",
+  
+        ]
+
+        for s in SELECTORS:
+            try:
+                n = len(driver.find_elements(By.CSS_SELECTOR, s))
+                log(f"[CHECK] {s} -> {n}")
+            except Exception as e:
+                log(f"[CHECK][ERR] {s} -> {e}")
+
+        try:
+            _snapshot(driver, "after_scroll_diag")
+        except Exception:
+            pass
 
         data = _extract_listings(driver)
         log(f"[RESULT] Trovate {len(data)} card.")
