@@ -105,34 +105,6 @@ def _progressive_scroll(driver, steps=8, pause=0.7):
         driver.execute_script("window.scrollBy(0, document.body.scrollHeight * 0.25);")
         time.sleep(pause)
 
-def _click_cookie_consent(driver):
-    # Tenta varianti comuni "Accept/Consent/Agree"
-    texts = ["Accept", "I agree", "Consent", "Agree", "Accetta", "OK"]
-    for t in texts:
-        try:
-            btns = driver.find_elements(By.XPATH, f"//button[normalize-space()='{t}']")
-            if btns:
-                btns[0].click()
-                time.sleep(0.5)
-                return True
-        except Exception:
-            pass
-    # data-testid comuni
-    for sel in [
-        "[data-testid='accept-consent']",
-        "button[aria-label*='accept']",
-        "button[aria-label*='consent']",
-    ]:
-        try:
-            els = driver.find_elements(By.CSS_SELECTOR, sel)
-            if els:
-                els[0].click()
-                time.sleep(0.5)
-                return True
-        except Exception:
-            pass
-    return False
-
 # PATCH 2: extended wait and diagnostic snapshots
 import os, time
 from datetime import datetime
