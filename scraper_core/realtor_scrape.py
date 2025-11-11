@@ -508,6 +508,16 @@ def run_scrape(
     Chiama lo scraper interno 'scrape_realtor' una o due volte e unisce i risultati in un unico DataFrame.
     """
     print("[REALTOR][VER] run_scrape wrapper attivo", flush=True)
+    # Snapshot iniziale per confermare l'avvio del wrapper (diagnostica)
+    try:
+        from datetime import datetime
+        snap_test = f"/app/results/snapshots/realtor_start_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        os.makedirs("/app/results/snapshots", exist_ok=True)
+        with open(snap_test, "w", encoding="utf-8") as f:
+            f.write("run_scrape avviato\n")
+        print(f"[SNAP] Created {snap_test}", flush=True)
+    except Exception as e:
+        print("[SNAP][ERR] Impossibile creare snapshot iniziale:", e, flush=True)
 
     parts = []
 
