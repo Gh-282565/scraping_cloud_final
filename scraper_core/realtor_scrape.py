@@ -451,11 +451,18 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
                 _snapshot(driver, "zero_results")
                 return []
                 
-        # ⚠️ satura la virtual-list PRIMA del parsing
-        _deep_fill_results(driver, cycles=6)
+def _deep_fill_results(driver, cycles=6):
+    # Alterna scroll del window + container e piccole pause
+    for _ in range(cycles):
+        _progressive_scroll(driver, steps=5, pause=0.45)
+        time.sleep(0.8)  # lascia tempo al lazy-load per montare le card
         
-        # scroll profondo per far materializzare tutte le card lazy
-        _progressive_scroll(driver, steps=8, pause=0.7)
+# satura la virtual-list PRIMA del parsing
+_deep_fill_results(driver, cycles=6)
+
+# scroll profondo per far materializzare tutte le card lazy
+_progressive_scroll(driver, steps=8, pause=0.7)
+
         # --- DIAGNOSTICA SELETTORI CARD (prima del parsing) ---
         from selenium.webdriver.common.by import By
         SELECTORS = [
