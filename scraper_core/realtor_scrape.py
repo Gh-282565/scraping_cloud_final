@@ -163,7 +163,7 @@ def _parse_acres_from_text(text):
     return ""
 
 def _extract_listings(driver):
-        from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.by import By
 
     SELECTORS = [
         "article[data-testid='property-card']",
