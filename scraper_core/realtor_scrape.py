@@ -1,12 +1,12 @@
 # realtor_scrape.py
-# Versione: 2025-11-11_fixA
-# - Driver FAST UC opzionale (REALTOR_FAST=1 di default)
-# - URL corretta: .../type-land/lot-sqft-<min>-<max> [+ "/sold" se richiesto]
+# Build: 2025-11-11 Render-lean v2
+# - UC headless "new", profilo in /tmp (meno RAM, più sicuro su Render)
+# - Immagini OFF (REALTOR_IMAGES=1 per abilitarle)
+# - URL corretta: .../type-land/lot-sqft-<min>-<max> [+ "/sold"]
 # - Consent iframe-aware
-# - Snapshot HTML diagnostici in /app/results/snapshots
-# - Scroll progressivo (window + virtual list)
-# - Parser con multipli selettori/fallback
-# - run_scrape() -> pandas.DataFrame (per orchestratore)
+# - Snapshot diagnostici in /app/results/snapshots
+# - Scroll/cicli ridotti per evitare kill per risorse
+# - run_scrape(...) -> pandas.DataFrame con colonne standard
 
 import os
 import re
@@ -25,9 +25,7 @@ os.makedirs(SNAP_DIR, exist_ok=True)
 def log(msg: str):
     print(msg, flush=True)
 
-# ------------------------------------------------------------
-# Toggle driver: FAST UC (ambiente test) vs driver condiviso
-# ------------------------------------------------------------
+# Toggle UC fast (default ON)
 USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))
 
 def _import_uc():
@@ -39,29 +37,23 @@ def _import_driver_factory():
     from scraper_core.driver_factory import get_driver
     return get_driver
 
-# Selenium comuni
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
-# ------------------------------------------------------------
-# Driver FAST UC (come in ambiente cloud test)
-# ------------------------------------------------------------
+# ---------------- Driver (lean) ----------------
 def _build_fast_uc_driver():
     uc, ChromeOptions = _import_uc()
     opts = ChromeOptions()
-    # DOM interactive più rapido
     opts.set_capability("pageLoadStrategy", "eager")
-    # Headless moderno
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1440,1200")
+    opts.add_argument("--window-size=1200,1000")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--lang=en-US,en")
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    # Immagini OFF di default (abilita con REALTOR_IMAGES=1 se serve)
     imgs_on = (os.getenv("REALTOR_IMAGES", "0") == "1")
     prefs = {
         "profile.managed_default_content_settings.images": (1 if imgs_on else 2),
@@ -71,31 +63,27 @@ def _build_fast_uc_driver():
     if not imgs_on:
         opts.add_argument("--blink-settings=imagesEnabled=false")
 
-    # Profilo dedicato (mitiga bot detection)
-    profile_dir = os.path.join(os.getcwd(), "uc_profile_realtor")
+    profile_dir = "/tmp/uc_profile_realtor"
     os.makedirs(profile_dir, exist_ok=True)
     opts.add_argument(f"--user-data-dir={profile_dir}")
 
     driver = uc.Chrome(options=opts)
     return driver
 
-# ------------------------------------------------------------
-# Utility DOM / snapshot / attese / scroll
-# ------------------------------------------------------------
+# ---------------- Utils DOM/Snapshot ----------------
 def _snapshot(driver, tag: str):
     try:
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         fn = os.path.join(SNAP_DIR, f"realtor_{tag}_{ts}.html")
         with open(fn, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        log(f"[SNAP] Saved {fn}")
+        log(f"[SNAP] {fn}")
     except Exception as e:
         log(f"[SNAP][ERR] {e}")
 
 def _click_cookie_consent(driver, timeout: int = 8) -> bool:
     try:
         driver.implicitly_wait(2)
-        # tenta negli iframe
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
         for fr in iframes:
             try:
@@ -108,12 +96,11 @@ def _click_cookie_consent(driver, timeout: int = 8) -> bool:
                 if btns:
                     btns[0].click()
                     driver.switch_to.default_content()
-                    log("[CONSENT] Clicked inside iframe")
+                    log("[CONSENT] in iframe")
                     return True
                 driver.switch_to.default_content()
             except Exception:
                 driver.switch_to.default_content()
-        # tenta nel main document
         btns = driver.find_elements(
             By.XPATH,
             "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')"
@@ -121,27 +108,24 @@ def _click_cookie_consent(driver, timeout: int = 8) -> bool:
         )
         if btns:
             btns[0].click()
-            log("[CONSENT] Clicked on main doc")
+            log("[CONSENT] main")
             return True
     except Exception as e:
-        log(f"[CONSENT] No banner or failed: {e}")
+        log(f"[CONSENT][ERR] {e}")
     try:
         driver.switch_to.default_content()
     except Exception:
         pass
     return False
 
-def _wait_for_results(driver, timeout: int = 40) -> bool:
+def _wait_for_results(driver, timeout: int = 35) -> bool:
     from selenium.webdriver.support.ui import WebDriverWait
     SELECTORS = [
-        # carte “moderne”
         "[data-testid='component-property-card']",
         "[data-testid='property-card']",
         "article[data-testid*='property-card']",
-        # liste contenitori
         "ul[data-testid='results-list']",
         "div[data-testid='search-result-list']",
-        # fallback legacy
         "a[href*='/realestateandhomes-detail/']",
     ]
     try:
@@ -152,7 +136,7 @@ def _wait_for_results(driver, timeout: int = 40) -> bool:
     except Exception:
         return False
 
-def _scroll_results_container(driver, steps: int = 6, pause: float = 0.6):
+def _scroll_results_container(driver, steps: int = 3, pause: float = 0.5):
     js = """
     (function(){
       const sels = [
@@ -182,7 +166,7 @@ def _scroll_results_container(driver, steps: int = 6, pause: float = 0.6):
             pass
         time.sleep(pause)
 
-def _progressive_scroll(driver, steps: int = 8, pause: float = 0.7):
+def _progressive_scroll(driver, steps: int = 4, pause: float = 0.55):
     for _ in range(steps):
         try:
             driver.execute_script("window.scrollBy(0, Math.floor(window.innerHeight*0.85));")
@@ -191,14 +175,12 @@ def _progressive_scroll(driver, steps: int = 8, pause: float = 0.7):
         _scroll_results_container(driver, steps=1, pause=0.0)
         time.sleep(pause)
 
-def _deep_fill_results(driver, cycles: int = 6):
+def _deep_fill_results(driver, cycles: int = 2):
     for _ in range(cycles):
-        _progressive_scroll(driver, steps=5, pause=0.45)
-        time.sleep(0.8)
+        _progressive_scroll(driver, steps=3, pause=0.45)
+        time.sleep(0.6)
 
-# ------------------------------------------------------------
-# URL builder (usa sqft: 1 acro = 43.560 sqft)
-# ------------------------------------------------------------
+# ---------------- URL builder ----------------
 def _url_for(state_abbr: str, county_name: str, acres_min, acres_max, sold: bool = False) -> str:
     try:
         mn = int(round(float(acres_min) * 43560))
@@ -216,9 +198,7 @@ def _url_for(state_abbr: str, county_name: str, acres_min, acres_max, sold: bool
         base += "/sold"
     return base
 
-# ------------------------------------------------------------
-# Parsing helpers
-# ------------------------------------------------------------
+# ---------------- Parsing helpers ----------------
 def _first_price(text: str) -> str:
     m = re.search(r"\$[\d,]+", text or "")
     return m.group(0) if m else ""
@@ -240,13 +220,11 @@ def _parse_acres_from_text(text: str) -> str:
 def _extract_listings(driver) -> List[Dict[str, Any]]:
     listings: List[Dict[str, Any]] = []
 
-    # Selettori principali
     cards = driver.find_elements(
         By.CSS_SELECTOR,
         "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='property-card']"
     )
 
-    # Fallback XPATH
     if not cards:
         xp_candidates = [
             "//li[contains(@class,'component_property-card')]",
@@ -264,7 +242,6 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-    # Se ancora niente, usa ancore grezze
     if not cards:
         anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
         for a in anchors:
@@ -279,10 +256,9 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 pass
         return listings
 
-    # Parsing dettagliato delle card
     for el in cards:
         try:
-            # titolo
+            # title
             title = ""
             for sel in [("css","[data-testid='card-title']"), ("css","h3"), ("css","h2"), ("xpath",".//h3|.//h2")]:
                 try:
@@ -293,15 +269,11 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 except Exception:
                     pass
 
-            # prezzo
+            # price
             price = ""
-            for sel in [
-                ("css","[data-testid='card-price']"),
-                ("css","span[data-label='pc-price']"),
-                ("css","span[data-testid*='price']"),
-                ("css","span[class*='price']"),
-                ("xpath",".//*[contains(text(),'$')]")
-            ]:
+            for sel in [("css","[data-testid='card-price']"), ("css","span[data-label='pc-price']"),
+                        ("css","span[data-testid*='price']"), ("css","span[class*='price']"),
+                        ("xpath",".//*[contains(text(),'$')]")]:
                 try:
                     cand = el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0]=="css" else el.find_elements(By.XPATH, sel[1])
                     if cand:
@@ -322,12 +294,8 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
 
             # link
             link = ""
-            for sel in [
-                ("css","a[data-testid='card-link']"),
-                ("css","a[data-testid*='property-card']"),
-                ("css","a[href*='/realestateandhomes-detail/']"),
-                ("xpath",".//a[contains(@href,'/realestateandhomes-detail/')]")
-            ]:
+            for sel in [("css","a[data-testid='card-link']"), ("css","a[data-testid*='property-card']"),
+                        ("css","a[href*='/realestateandhomes-detail/']"), ("xpath",".//a[contains(@href,'/realestateandhomes-detail/')]")]:
                 try:
                     cand = el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0]=="css" else el.find_elements(By.XPATH, sel[1])
                     if cand:
@@ -359,9 +327,7 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
 
     return listings
 
-# ------------------------------------------------------------
-# Parametri e funzione principale di scraping
-# ------------------------------------------------------------
+# ---------------- Scraper core ----------------
 @dataclass
 class RealtorParams:
     state: str
@@ -374,10 +340,10 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
     driver = None
     try:
         if USE_FAST_UC:
-            log("[DRIVER] FAST UC attivo (ambiente test).")
+            log("[DRIVER] FAST UC attivo.")
             driver = _build_fast_uc_driver()
         else:
-            log("[DRIVER] Driver condiviso (driver_factory).")
+            log("[DRIVER] driver_factory")
             driver = _import_driver_factory()()
 
         url = _url_for(params.state, params.county, params.acres_min, params.acres_max, sold=params.sold)
@@ -391,35 +357,33 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         log(f"[CONSENT] clicked={clicked}")
         _snapshot(driver, "after_consent")
 
-        if not _wait_for_results(driver, timeout=40):
-            log("[WAIT] Nessun indicatore; scroll profondo…")
-            _progressive_scroll(driver, steps=10, pause=0.6)
-            if not _wait_for_results(driver, timeout=40):
+        if not _wait_for_results(driver, timeout=35):
+            log("[WAIT] nessun indicatore; scroll")
+            _progressive_scroll(driver, steps=4, pause=0.55)
+            if not _wait_for_results(driver, timeout=35):
                 _snapshot(driver, "zero_results")
                 return []
 
-        # saturazione virtual-list + scroll profondo
-        _deep_fill_results(driver, cycles=6)
-        _progressive_scroll(driver, steps=8, pause=0.7)
+        # saturazione leggera della virtual list
+        _deep_fill_results(driver, cycles=2)
+        _progressive_scroll(driver, steps=3, pause=0.5)
 
-        # diagnostica quantità card prima del parsing
-        for s in [
-            "article[data-testid='property-card']",
-            "section[data-testid='property-card']",
-            "div[data-testid='property-card']",
-            "ul[data-testid='results-list'] article",
-            "div[data-testid='search-result-list'] article",
-            "div[class^='BasePropertyCard_propertyCardWrap__'] article",
-        ]:
-            try:
+        # diagnostica
+        try:
+            for s in [
+                "article[data-testid='property-card']",
+                "div[data-testid='property-card']",
+                "ul[data-testid='results-list'] article",
+                "div[data-testid='search-result-list'] article",
+            ]:
                 n = len(driver.find_elements(By.CSS_SELECTOR, s))
                 log(f"[CHECK] {s} -> {n}")
-            except Exception as e:
-                log(f"[CHECK][ERR] {s} -> {e}")
+        except Exception as e:
+            log(f"[CHECK][ERR] {e}")
         _snapshot(driver, "after_scroll_diag")
 
         data = _extract_listings(driver)
-        log(f"[RESULT] Trovate {len(data)} card.")
+        log(f"[RESULT] {len(data)} card")
         return data
     except Exception as e:
         log(f"[ERROR] {e}")
@@ -437,9 +401,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-# ------------------------------------------------------------
-# Writer Excel semplice (opzionale, usato in __main__)
-# ------------------------------------------------------------
+# ---------------- Excel writer (opzionale CLI) ----------------
 def save_excel(records: List[Dict[str, Any]], path: str):
     import pandas as pd
     from openpyxl.utils import get_column_letter
@@ -458,9 +420,7 @@ def save_excel(records: List[Dict[str, Any]], path: str):
         for idx, _ in enumerate(df.columns, start=1):
             ws.column_dimensions[get_column_letter(idx)].width = 19
 
-# ------------------------------------------------------------
-# Wrapper per orchestratore GUI
-# ------------------------------------------------------------
+# ---------------- Wrapper orchestratore ----------------
 import pandas as pd
 
 def _num(x):
@@ -503,16 +463,15 @@ def run_scrape(
     acres_max: int,
     include_forsale: bool,
     include_sold: bool,
-    headless: bool = True,   # ignorato: driver interno già headless/new
+    headless: bool = True,
     period: Optional[str] = None,
 ) -> pd.DataFrame:
     log("[REALTOR][VER] run_scrape wrapper attivo")
-    # Snapshot “start” per conferma avvio
     try:
         start_marker = os.path.join(SNAP_DIR, f"realtor_start_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt")
         with open(start_marker, "w", encoding="utf-8") as f:
             f.write("run_scrape avviato\n")
-        log(f"[SNAP] Created {start_marker}")
+        log(f"[SNAP] {start_marker}")
     except Exception as e:
         log(f"[SNAP][ERR] {e}")
 
@@ -535,11 +494,8 @@ def run_scrape(
 
     return pd.concat(parts, ignore_index=True)
 
-# ------------------------------------------------------------
-# CLI di test locale (opzionale)
-# ------------------------------------------------------------
+# ---------------- CLI test ----------------
 if __name__ == "__main__":
-    # Esempio: python realtor_scrape.py GA Appling 0 5 forsale
     if len(sys.argv) >= 6:
         state = sys.argv[1]
         county = sys.argv[2]
