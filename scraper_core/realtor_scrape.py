@@ -329,33 +329,31 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
         log("[URL]", url)
 
         driver.get(url)
-time.sleep(2)
+        import time
+        time.sleep(2)  # piccolo buffer post-navigazione
 
-# DIAGNOSTICA
-try:
-    _snapshot(driver, "after_get")
-except Exception:
-    pass
+        # diagnosi post-navigazione
+        try:
+            _snapshot(driver, "after_get")
+        except Exception:
+            pass
 
-clicked = _click_cookie_consent(driver)
-print(f"[CONSENT] clicked={clicked}", flush=True)
+        # cookie consent (USARE la funzione rimasta in alto, iframe-aware)
+        clicked = _click_cookie_consent(driver)
+        log(f"[CONSENT] clicked={clicked}")
+        try:
+            _snapshot(driver, "after_consent")
+        except Exception:
+            pass
 
-try:
-    _snapshot(driver, "after_consent")
-except Exception:
-    pass
+        # attendi comparsa risultati; se nulla, scroll profondo e riattendi
+        if not _wait_for_results(driver, timeout=25):
+            _progressive_scroll(driver, steps=8, pause=0.7)
+            if not _wait_for_results(driver, timeout=25):
+                _snapshot(driver, "zero_results")
+                return []
 
-# Scroll corto, attesa, scroll profondo
-_progressive_scroll(driver, steps=2, pause=0.7)
-if not _wait_for_results(driver, timeout=25):  # <-- 25s
-    log("[WAIT] Nessun indicatore risultati; continuo con scroll profondo.")
-_progressive_scroll(driver, steps=8, pause=0.7)
-)
-
-        # Scroll corto, attesa, scroll profondo
-        _progressive_scroll(driver, steps=2, pause=0.7)
-        if not _wait_for_results(driver, timeout=20):
-            log("[WAIT] Nessun indicatore risultati; continuo con scroll profondo.")
+        # scroll profondo per far materializzare tutte le card lazy
         _progressive_scroll(driver, steps=8, pause=0.7)
 
         data = _extract_listings(driver)
