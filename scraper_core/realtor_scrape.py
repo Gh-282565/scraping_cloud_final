@@ -175,7 +175,7 @@ def _snapshot(driver, tag):
     except Exception as e:
         print("[SNAP] Error saving snapshot:", e)
 
-def _wait_for_results(driver, timeout=25):
+def _wait_for_results(driver, timeout=40):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
 
@@ -187,6 +187,8 @@ def _wait_for_results(driver, timeout=25):
         "ul[data-testid='results-list'] article",
         "div[data-testid='search-result-list'] article",
         "div[class^='BasePropertyCard_propertyCardWrap__'] article",
+        "ul[data-testid='results-list']",
+        "div[data-testid='search-result-list']",
     ]
     try:
         WebDriverWait(driver, timeout).until(
@@ -443,9 +445,9 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
             pass
 
         # attendi comparsa risultati; se nulla, scroll profondo e riattendi
-        if not _wait_for_results(driver, timeout=25):
-            _progressive_scroll(driver, steps=8, pause=0.7)
-            if not _wait_for_results(driver, timeout=25):
+        if not _wait_for_results(driver, timeout=40):
+            _progressive_scroll(driver, steps=10, pause=0.6)
+            if not _wait_for_results(driver, timeout=40):
                 _snapshot(driver, "zero_results")
                 return []
 
