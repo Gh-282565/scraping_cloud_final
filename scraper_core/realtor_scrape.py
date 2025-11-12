@@ -1,13 +1,11 @@
-# realtor_scrape.py — DIAG build (2025-11-12)
-# Basato sulla tua ultima versione Render-lean v2, con diagnostica estesa.
-# Novità principali:
-# - Flag ENV per controllo runtime: REALTOR_FAST, REALTOR_WAIT, REALTOR_SCROLL, REALTOR_IMAGES,
-#   REALTOR_QUICK (uscita dopo consent), REALTOR_DIAG (snap multipli + log extra).
-# - URL corretta con lot-sqft-<min>-<max> e /sold opzionale.
-# - Consent iframe-aware (una sola versione), snapshot HTML in più fasi, 
-#   scroll progressivo e riempimento della virtual list.
-# - Parser più tollerante: CSS + XPATH + fallback tramite anchor.
-# - Writer Excel opzionale (CLI) e wrapper run_scrape -> DataFrame standard.
+# realtor_scrape.py — FAST-55s DIAG (2025-11-12)
+# Solo patch al modulo Realtor (nessun cambio a app.py/Zillow).
+# Obiettivi:
+# - Tenere l’esecuzione < ~55–60s (evita 502) con BUDGET_SEC.
+# - Consenso più aggressivo (iframe + main + JS).
+# - Wait breve con fallback; 1 solo ciclo di deep scroll.
+# - Parser tollerante (CSS+XPATH+fallback anchor).
+# - Snapshot diagnostici in più fasi.
 
 import os
 import re
@@ -26,12 +24,15 @@ SNAP_DIR = os.path.join(RESULTS_BASE, "snapshots")
 os.makedirs(RESULTS_BASE, exist_ok=True)
 os.makedirs(SNAP_DIR, exist_ok=True)
 
-WAIT_TIMEOUT = int(os.getenv("REALTOR_WAIT", "35"))            # attesa indicatori lista
-SCROLL_CYCLES = int(os.getenv("REALTOR_SCROLL", "2"))           # cicli deep fill
-USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))         # UC driver lean
-IMAGES_ON = (os.getenv("REALTOR_IMAGES", "0") == "1")           # immagini ON/OFF
-QUICK_EXIT = bool(int(os.getenv("REALTOR_QUICK", "0")))          # esci dopo consent
-DIAG_MODE = bool(int(os.getenv("REALTOR_DIAG", "1")))            # diagnostica estesa
+# Tempi/flag (versione FAST-55s)
+WAIT_TIMEOUT = int(os.getenv("REALTOR_WAIT", "15"))          # attesa indicatori lista (breve)
+SCROLL_CYCLES = int(os.getenv("REALTOR_SCROLL", "1"))        # un solo ciclo
+BUDGET_SEC = int(os.getenv("REALTOR_BUDGET", "55"))          # budget totale di esecuzione
+
+USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))      # UC driver lean
+IMAGES_ON = (os.getenv("REALTOR_IMAGES", "0") == "1")        # immagini ON/OFF
+QUICK_EXIT = bool(int(os.getenv("REALTOR_QUICK", "0")))      # esci dopo consent
+DIAG_MODE = bool(int(os.getenv("REALTOR_DIAG", "1")))        # diagnostica estesa
 
 
 def log(msg: str):
@@ -105,38 +106,70 @@ def _snapshot(driver, tag: str):
 
 
 def _click_cookie_consent(driver, timeout: int = 10) -> bool:
-    """Prova in iframe, poi nel main. Non rilancia eccezioni."""
+    """
+    Consenso aggressivo: (1) iframe, (2) main, (3) JS click.
+    Cerca varianti di testo/aria-label/data-testid.
+    """
+    end = time.time() + timeout
+
+    TARGET_XPATH = (
+        "//button[normalize-space()='Accept All' or normalize-space()='Accept all' or "
+        "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') or "
+        "contains(., 'i agree') or contains(., 'agree & continue') or contains(., 'continue')]"
+        "|//button[@aria-label='Accept all' or @aria-label='Accept All']"
+        "|//*[@data-testid='consent-accept']"
+        "|//button[contains(@id,'onetrust-accept') or contains(@id,'accept-all')]"
+    )
+
+    def _try_click_in_context():
+        # xpath classico
+        btns = driver.find_elements(By.XPATH, TARGET_XPATH)
+        if btns:
+            try:
+                btns[0].click()
+                return True
+            except Exception:
+                pass
+        # JS click su primo bottone con testo compatibile
+        try:
+            return bool(driver.execute_script("""
+                const texts=['accept','i agree','agree & continue','continue'];
+                const nodes=[...document.querySelectorAll('button, [role=button]')];
+                for(const b of nodes){
+                    const t=(b.textContent||'').toLowerCase();
+                    if(texts.some(x=>t.includes(x))){ b.click(); return true; }
+                }
+                const ot=document.getElementById('onetrust-accept-btn-handler');
+                if(ot){ ot.click(); return true; }
+                return false;
+            """))
+        except Exception:
+            return False
+
+    # 1) iframes
     try:
-        driver.implicitly_wait(2)
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for fr in iframes:
+        frames = driver.find_elements(By.TAG_NAME, "iframe")
+        for fr in frames:
             try:
                 driver.switch_to.frame(fr)
-                btns = driver.find_elements(
-                    By.XPATH,
-                    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') "
-                    "or contains(., 'I agree') or contains(., 'Consenti')]",
-                )
-                if btns:
-                    btns[0].click()
+                if _try_click_in_context():
                     driver.switch_to.default_content()
                     log("[CONSENT] in iframe")
                     return True
                 driver.switch_to.default_content()
             except Exception:
                 driver.switch_to.default_content()
-        # main
-        btns = driver.find_elements(
-            By.XPATH,
-            "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') "
-            "or contains(., 'I agree') or contains(., 'Consenti')]",
-        )
-        if btns:
-            btns[0].click()
-            log("[CONSENT] main")
+    except Exception:
+        pass
+
+    # 2) main + 3) JS
+    try:
+        if _try_click_in_context():
+            log("[CONSENT] main/js")
             return True
     except Exception as e:
         log(f"[CONSENT][ERR] {e}")
+
     try:
         driver.switch_to.default_content()
     except Exception:
@@ -153,6 +186,8 @@ def _wait_for_results(driver, timeout: int) -> bool:
         "ul[data-testid='results-list']",
         "div[data-testid='search-result-list']",
         "a[href*='/realestateandhomes-detail/']",
+        "[data-testid='srp-result-count']",
+        "span[class*='results']",
     ]
     try:
         WebDriverWait(driver, timeout).until(
@@ -160,10 +195,11 @@ def _wait_for_results(driver, timeout: int) -> bool:
         )
         return True
     except Exception:
-        return False
+        # Fallback: se ci sono anchor di dettaglio, consideriamo OK
+        return len(driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")) > 0
 
 
-def _scroll_results_container(driver, steps: int = 3, pause: float = 0.45):
+def _scroll_results_container(driver, steps: int = 2, pause: float = 0.35):
     js = """
     (function(){
       const sels = [
@@ -194,7 +230,7 @@ def _scroll_results_container(driver, steps: int = 3, pause: float = 0.45):
         time.sleep(pause)
 
 
-def _progressive_scroll(driver, steps: int = 4, pause: float = 0.55):
+def _progressive_scroll(driver, steps: int = 3, pause: float = 0.45):
     for _ in range(steps):
         try:
             driver.execute_script("window.scrollBy(0, Math.floor(window.innerHeight*0.85));")
@@ -206,8 +242,8 @@ def _progressive_scroll(driver, steps: int = 4, pause: float = 0.55):
 
 def _deep_fill_results(driver, cycles: int):
     for _ in range(cycles):
-        _progressive_scroll(driver, steps=3, pause=0.50)
-        time.sleep(0.6)
+        _progressive_scroll(driver, steps=3, pause=0.40)
+        time.sleep(0.5)
 
 
 # --------------------------------------------------
@@ -291,7 +327,7 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 pass
 
     if not cards:
-        # Fallback minimale: ancora -> parent text
+        # Fallback minimale: anchor -> parent text
         anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
         for a in anchors:
             try:
@@ -353,7 +389,7 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
             # acres (lot info nel blocco)
             acres_text = ""
             try:
-                lot_els = el.find_elements(By.XPATH, 
+                lot_els = el.find_elements(By.XPATH,
                     ".//*[contains(translate(text(),'ACRES','acres'),'acres') or contains(translate(text(),'LOT','lot'),'lot')]"
                 )
                 if lot_els:
@@ -417,22 +453,22 @@ class RealtorParams:
 
 
 def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
+    t0 = time.time()
+    def time_left() -> float:
+        return BUDGET_SEC - (time.time() - t0)
+
     driver = None
     try:
-        if USE_FAST_UC:
-            driver = _build_fast_uc_driver()
-        else:
-            log("[DRIVER] driver_factory")
-            driver = _import_driver_factory()()
+        driver = _build_fast_uc_driver() if USE_FAST_UC else _import_driver_factory()()
 
         url = _url_for(params.state, params.county, params.acres_min, params.acres_max, sold=params.sold)
         log(f"[URL] {url}")
 
         driver.get(url)
-        time.sleep(2)
+        time.sleep(1.5)
         _snapshot(driver, "after_get")
 
-        clicked = _click_cookie_consent(driver)
+        clicked = _click_cookie_consent(driver, timeout=min(8, max(3, int(time_left()/4))))
         log(f"[CONSENT] clicked={clicked}")
         _snapshot(driver, "after_consent")
 
@@ -440,24 +476,22 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
             log("[QUICK] Uscita dopo consent per test di stabilità.")
             return []
 
-        if not _wait_for_results(driver, timeout=WAIT_TIMEOUT):
-            log("[WAIT] nessun indicatore; scroll")
-            _progressive_scroll(driver, steps=4, pause=0.55)
-            if not _wait_for_results(driver, timeout=WAIT_TIMEOUT):
-                _snapshot(driver, "zero_results")
-                return []
+        # Wait breve; se nulla, scroll leggero e parse
+        tl = max(5, min(WAIT_TIMEOUT, int(max(5, time_left()/2))))
+        ok = _wait_for_results(driver, timeout=tl)
+        if not ok and time_left() > 10:
+            log("[WAIT] nessun indicatore; scroll leggero")
+            _progressive_scroll(driver, steps=2, pause=0.35)
 
-        # riempimento lieve della virtual list
-        _deep_fill_results(driver, cycles=SCROLL_CYCLES)
-        _progressive_scroll(driver, steps=3, pause=0.5)
+        # Un solo deep fill se resta tempo
+        if time_left() > 15 and SCROLL_CYCLES > 0:
+            _deep_fill_results(driver, cycles=1)
 
         # diagnostica selettori
         try:
             for s in [
                 "article[data-testid='property-card']",
                 "div[data-testid='property-card']",
-                "ul[data-testid='results-list'] article",
-                "div[data-testid='search-result-list'] article",
                 "a[href*='/realestateandhomes-detail/']",
             ]:
                 n = len(driver.find_elements(By.CSS_SELECTOR, s))
@@ -469,8 +503,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         data = _extract_listings(driver)
         log(f"[RESULT] trovate {len(data)} card")
 
-        if len(data) == 0:
-            # ultima foto istantanea quando 0 risultati, per confronto
+        if not data:
             _snapshot(driver, "after_parse_zero")
         return data
 
