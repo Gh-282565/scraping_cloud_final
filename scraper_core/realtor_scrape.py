@@ -1,12 +1,13 @@
-# realtor_scrape.py
-# Build: 2025-11-11 Render-lean v2
-# - UC headless "new", profilo in /tmp (meno RAM, più sicuro su Render)
-# - Immagini OFF (REALTOR_IMAGES=1 per abilitarle)
-# - URL corretta: .../type-land/lot-sqft-<min>-<max> [+ "/sold"]
-# - Consent iframe-aware
-# - Snapshot diagnostici in /app/results/snapshots
-# - Scroll/cicli ridotti per evitare kill per risorse
-# - run_scrape(...) -> pandas.DataFrame con colonne standard
+# realtor_scrape.py — DIAG build (2025-11-12)
+# Basato sulla tua ultima versione Render-lean v2, con diagnostica estesa.
+# Novità principali:
+# - Flag ENV per controllo runtime: REALTOR_FAST, REALTOR_WAIT, REALTOR_SCROLL, REALTOR_IMAGES,
+#   REALTOR_QUICK (uscita dopo consent), REALTOR_DIAG (snap multipli + log extra).
+# - URL corretta con lot-sqft-<min>-<max> e /sold opzionale.
+# - Consent iframe-aware (una sola versione), snapshot HTML in più fasi, 
+#   scroll progressivo e riempimento della virtual list.
+# - Parser più tollerante: CSS + XPATH + fallback tramite anchor.
+# - Writer Excel opzionale (CLI) e wrapper run_scrape -> DataFrame standard.
 
 import os
 import re
@@ -17,30 +18,43 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+# --------------------------------------------------
+# Config / Paths
+# --------------------------------------------------
 RESULTS_BASE = "/app/results"
 SNAP_DIR = os.path.join(RESULTS_BASE, "snapshots")
 os.makedirs(RESULTS_BASE, exist_ok=True)
 os.makedirs(SNAP_DIR, exist_ok=True)
 
+WAIT_TIMEOUT = int(os.getenv("REALTOR_WAIT", "35"))            # attesa indicatori lista
+SCROLL_CYCLES = int(os.getenv("REALTOR_SCROLL", "2"))           # cicli deep fill
+USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))         # UC driver lean
+IMAGES_ON = (os.getenv("REALTOR_IMAGES", "0") == "1")           # immagini ON/OFF
+QUICK_EXIT = bool(int(os.getenv("REALTOR_QUICK", "0")))          # esci dopo consent
+DIAG_MODE = bool(int(os.getenv("REALTOR_DIAG", "1")))            # diagnostica estesa
+
+
 def log(msg: str):
     print(msg, flush=True)
 
-# Toggle UC fast (default ON)
-USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))
 
+# --------------------------------------------------
+# Driver
+# --------------------------------------------------
 def _import_uc():
     import undetected_chromedriver as uc
     from selenium.webdriver.chrome.options import Options as ChromeOptions
     return uc, ChromeOptions
 
+
 def _import_driver_factory():
     from scraper_core.driver_factory import get_driver
     return get_driver
 
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
-# ---------------- Driver (lean) ----------------
+from selenium.webdriver.common.by import By
+
+
 def _build_fast_uc_driver():
     uc, ChromeOptions = _import_uc()
     opts = ChromeOptions()
@@ -49,18 +63,20 @@ def _build_fast_uc_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1200,1000")
+    opts.add_argument("--window-size=1280,1100")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--lang=en-US,en")
-    opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    opts.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
 
-    imgs_on = (os.getenv("REALTOR_IMAGES", "0") == "1")
     prefs = {
-        "profile.managed_default_content_settings.images": (1 if imgs_on else 2),
-        "profile.default_content_setting_values": {"images": (1 if imgs_on else 2)},
+        "profile.managed_default_content_settings.images": (1 if IMAGES_ON else 2),
+        "profile.default_content_setting_values": {"images": (1 if IMAGES_ON else 2)},
     }
     opts.add_experimental_option("prefs", prefs)
-    if not imgs_on:
+    if not IMAGES_ON:
         opts.add_argument("--blink-settings=imagesEnabled=false")
 
     profile_dir = "/tmp/uc_profile_realtor"
@@ -68,10 +84,16 @@ def _build_fast_uc_driver():
     opts.add_argument(f"--user-data-dir={profile_dir}")
 
     driver = uc.Chrome(options=opts)
+    log(f"[DRIVER] FAST UC attivo | images={'ON' if IMAGES_ON else 'OFF'} | wait={WAIT_TIMEOUT}s")
     return driver
 
-# ---------------- Utils DOM/Snapshot ----------------
+
+# --------------------------------------------------
+# Utils / Snapshot / Waits
+# --------------------------------------------------
 def _snapshot(driver, tag: str):
+    if not DIAG_MODE:
+        return
     try:
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         fn = os.path.join(SNAP_DIR, f"realtor_{tag}_{ts}.html")
@@ -81,7 +103,9 @@ def _snapshot(driver, tag: str):
     except Exception as e:
         log(f"[SNAP][ERR] {e}")
 
-def _click_cookie_consent(driver, timeout: int = 8) -> bool:
+
+def _click_cookie_consent(driver, timeout: int = 10) -> bool:
+    """Prova in iframe, poi nel main. Non rilancia eccezioni."""
     try:
         driver.implicitly_wait(2)
         iframes = driver.find_elements(By.TAG_NAME, "iframe")
@@ -90,8 +114,8 @@ def _click_cookie_consent(driver, timeout: int = 8) -> bool:
                 driver.switch_to.frame(fr)
                 btns = driver.find_elements(
                     By.XPATH,
-                    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')"
-                    " or contains(., 'I agree') or contains(., 'Consenti')]"
+                    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') "
+                    "or contains(., 'I agree') or contains(., 'Consenti')]",
                 )
                 if btns:
                     btns[0].click()
@@ -101,10 +125,11 @@ def _click_cookie_consent(driver, timeout: int = 8) -> bool:
                 driver.switch_to.default_content()
             except Exception:
                 driver.switch_to.default_content()
+        # main
         btns = driver.find_elements(
             By.XPATH,
-            "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')"
-            " or contains(., 'I agree') or contains(., 'Consenti')]"
+            "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') "
+            "or contains(., 'I agree') or contains(., 'Consenti')]",
         )
         if btns:
             btns[0].click()
@@ -118,7 +143,8 @@ def _click_cookie_consent(driver, timeout: int = 8) -> bool:
         pass
     return False
 
-def _wait_for_results(driver, timeout: int = 35) -> bool:
+
+def _wait_for_results(driver, timeout: int) -> bool:
     from selenium.webdriver.support.ui import WebDriverWait
     SELECTORS = [
         "[data-testid='component-property-card']",
@@ -136,7 +162,8 @@ def _wait_for_results(driver, timeout: int = 35) -> bool:
     except Exception:
         return False
 
-def _scroll_results_container(driver, steps: int = 3, pause: float = 0.5):
+
+def _scroll_results_container(driver, steps: int = 3, pause: float = 0.45):
     js = """
     (function(){
       const sels = [
@@ -166,6 +193,7 @@ def _scroll_results_container(driver, steps: int = 3, pause: float = 0.5):
             pass
         time.sleep(pause)
 
+
 def _progressive_scroll(driver, steps: int = 4, pause: float = 0.55):
     for _ in range(steps):
         try:
@@ -175,12 +203,24 @@ def _progressive_scroll(driver, steps: int = 4, pause: float = 0.55):
         _scroll_results_container(driver, steps=1, pause=0.0)
         time.sleep(pause)
 
-def _deep_fill_results(driver, cycles: int = 2):
+
+def _deep_fill_results(driver, cycles: int):
     for _ in range(cycles):
-        _progressive_scroll(driver, steps=3, pause=0.45)
+        _progressive_scroll(driver, steps=3, pause=0.50)
         time.sleep(0.6)
 
-# ---------------- URL builder ----------------
+
+# --------------------------------------------------
+# URL builder
+# --------------------------------------------------
+def _slugify_county(name: str) -> str:
+    s = (name or "").strip().lower()
+    s = re.sub(r"[&]", " and ", s)
+    s = re.sub(r"[^a-z0-9\s-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    return s
+
+
 def _url_for(state_abbr: str, county_name: str, acres_min, acres_max, sold: bool = False) -> str:
     try:
         mn = int(round(float(acres_min) * 43560))
@@ -190,18 +230,25 @@ def _url_for(state_abbr: str, county_name: str, acres_min, acres_max, sold: bool
         mx = int(round(float(acres_max) * 43560))
     except Exception:
         mx = 0
-    county_slug = county_name.strip().lower().replace(" ", "-")
-    base = f"https://www.realtor.com/realestateandhomes-search/{county_slug}-county_{state_abbr.upper()}/type-land"
+    county_slug = _slugify_county(county_name)
+    base = (
+        f"https://www.realtor.com/realestateandhomes-search/"
+        f"{county_slug}-county_{state_abbr.upper()}/type-land"
+    )
     if mn or mx:
         base += f"/lot-sqft-{mn}-{mx}"
     if sold:
         base += "/sold"
     return base
 
-# ---------------- Parsing helpers ----------------
+
+# --------------------------------------------------
+# Parsing helpers
+# --------------------------------------------------
 def _first_price(text: str) -> str:
     m = re.search(r"\$[\d,]+", text or "")
     return m.group(0) if m else ""
+
 
 def _parse_acres_from_text(text: str) -> str:
     if not text:
@@ -217,12 +264,13 @@ def _parse_acres_from_text(text: str) -> str:
         return f"{acres:.2f}"
     return ""
 
+
 def _extract_listings(driver) -> List[Dict[str, Any]]:
     listings: List[Dict[str, Any]] = []
 
     cards = driver.find_elements(
         By.CSS_SELECTOR,
-        "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='property-card']"
+        "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='property-card']",
     )
 
     if not cards:
@@ -231,7 +279,7 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
             "//div[contains(@data-testid,'property-card')]",
             "//li[.//a[contains(@href,'/realestateandhomes-detail/')]]",
             "//a[contains(@href,'/realestateandhomes-detail/')]//ancestor::li",
-            "//a[contains(@href,'/realestateandhomes-detail/')]"
+            "//a[contains(@href,'/realestateandhomes-detail/')]",
         ]
         for xp in xp_candidates:
             try:
@@ -243,6 +291,7 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 pass
 
     if not cards:
+        # Fallback minimale: ancora -> parent text
         anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
         for a in anchors:
             try:
@@ -251,7 +300,13 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 block = parent.text
                 price = _first_price(block)
                 acres = _parse_acres_from_text(block)
-                listings.append({"title": a.text.strip(), "price": price, "acres": acres, "link": link, "status": ""})
+                listings.append({
+                    "title": a.text.strip(),
+                    "price": price,
+                    "acres": acres,
+                    "link": link,
+                    "status": "",
+                })
             except Exception:
                 pass
         return listings
@@ -260,9 +315,16 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
         try:
             # title
             title = ""
-            for sel in [("css","[data-testid='card-title']"), ("css","h3"), ("css","h2"), ("xpath",".//h3|.//h2")]:
+            for sel in [
+                ("css", "[data-testid='card-title']"),
+                ("css", "h3"),
+                ("css", "h2"),
+                ("xpath", ".//h3|.//h2"),
+            ]:
                 try:
-                    cand = el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0]=="css" else el.find_elements(By.XPATH, sel[1])
+                    cand = (
+                        el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0] == "css" else el.find_elements(By.XPATH, sel[1])
+                    )
                     if cand:
                         title = cand[0].text.strip()
                         break
@@ -271,21 +333,29 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
 
             # price
             price = ""
-            for sel in [("css","[data-testid='card-price']"), ("css","span[data-label='pc-price']"),
-                        ("css","span[data-testid*='price']"), ("css","span[class*='price']"),
-                        ("xpath",".//*[contains(text(),'$')]")]:
+            for sel in [
+                ("css", "[data-testid='card-price']"),
+                ("css", "span[data-label='pc-price']"),
+                ("css", "span[data-testid*='price']"),
+                ("css", "span[class*='price']"),
+                ("xpath", ".//*[contains(text(),'$')]")
+            ]:
                 try:
-                    cand = el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0]=="css" else el.find_elements(By.XPATH, sel[1])
+                    cand = (
+                        el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0] == "css" else el.find_elements(By.XPATH, sel[1])
+                    )
                     if cand:
                         price = cand[0].text.strip()
                         break
                 except Exception:
                     pass
 
-            # acres
+            # acres (lot info nel blocco)
             acres_text = ""
             try:
-                lot_els = el.find_elements(By.XPATH, ".//*[contains(translate(text(),'ACRES','acres'),'acres') or contains(translate(text(),'LOT','lot'),'lot')]")
+                lot_els = el.find_elements(By.XPATH, 
+                    ".//*[contains(translate(text(),'ACRES','acres'),'acres') or contains(translate(text(),'LOT','lot'),'lot')]"
+                )
                 if lot_els:
                     acres_text = lot_els[0].text.strip()
             except Exception:
@@ -294,10 +364,16 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
 
             # link
             link = ""
-            for sel in [("css","a[data-testid='card-link']"), ("css","a[data-testid*='property-card']"),
-                        ("css","a[href*='/realestateandhomes-detail/']"), ("xpath",".//a[contains(@href,'/realestateandhomes-detail/')]")]:
+            for sel in [
+                ("css", "a[data-testid='card-link']"),
+                ("css", "a[data-testid*='property-card']"),
+                ("css", "a[href*='/realestateandhomes-detail/']"),
+                ("xpath", ".//a[contains(@href,'/realestateandhomes-detail/')]")
+            ]:
                 try:
-                    cand = el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0]=="css" else el.find_elements(By.XPATH, sel[1])
+                    cand = (
+                        el.find_elements(By.CSS_SELECTOR, sel[1]) if sel[0] == "css" else el.find_elements(By.XPATH, sel[1])
+                    )
                     if cand:
                         link = cand[0].get_attribute("href") or ""
                         break
@@ -320,14 +396,17 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 "price": price,
                 "acres": acres,
                 "link": link,
-                "status": status_text
+                "status": status_text,
             })
         except Exception as e:
             log(f"[PARSE][CARD][ERR] {e}")
 
     return listings
 
-# ---------------- Scraper core ----------------
+
+# --------------------------------------------------
+# Scraper core
+# --------------------------------------------------
 @dataclass
 class RealtorParams:
     state: str
@@ -336,11 +415,11 @@ class RealtorParams:
     acres_max: float
     sold: bool = False
 
+
 def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
     driver = None
     try:
         if USE_FAST_UC:
-            log("[DRIVER] FAST UC attivo.")
             driver = _build_fast_uc_driver()
         else:
             log("[DRIVER] driver_factory")
@@ -357,24 +436,29 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         log(f"[CONSENT] clicked={clicked}")
         _snapshot(driver, "after_consent")
 
-        if not _wait_for_results(driver, timeout=35):
+        if QUICK_EXIT:
+            log("[QUICK] Uscita dopo consent per test di stabilità.")
+            return []
+
+        if not _wait_for_results(driver, timeout=WAIT_TIMEOUT):
             log("[WAIT] nessun indicatore; scroll")
             _progressive_scroll(driver, steps=4, pause=0.55)
-            if not _wait_for_results(driver, timeout=35):
+            if not _wait_for_results(driver, timeout=WAIT_TIMEOUT):
                 _snapshot(driver, "zero_results")
                 return []
 
-        # saturazione leggera della virtual list
-        _deep_fill_results(driver, cycles=2)
+        # riempimento lieve della virtual list
+        _deep_fill_results(driver, cycles=SCROLL_CYCLES)
         _progressive_scroll(driver, steps=3, pause=0.5)
 
-        # diagnostica
+        # diagnostica selettori
         try:
             for s in [
                 "article[data-testid='property-card']",
                 "div[data-testid='property-card']",
                 "ul[data-testid='results-list'] article",
                 "div[data-testid='search-result-list'] article",
+                "a[href*='/realestateandhomes-detail/']",
             ]:
                 n = len(driver.find_elements(By.CSS_SELECTOR, s))
                 log(f"[CHECK] {s} -> {n}")
@@ -383,13 +467,18 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         _snapshot(driver, "after_scroll_diag")
 
         data = _extract_listings(driver)
-        log(f"[RESULT] {len(data)} card")
+        log(f"[RESULT] trovate {len(data)} card")
+
+        if len(data) == 0:
+            # ultima foto istantanea quando 0 risultati, per confronto
+            _snapshot(driver, "after_parse_zero")
         return data
+
     except Exception as e:
         log(f"[ERROR] {e}")
         try:
+            et, ex, tb = sys.exc_info()
             with open(os.path.join(RESULTS_BASE, "logs_realtor_error.txt"), "w", encoding="utf-8") as f:
-                et, ex, tb = sys.exc_info()
                 f.write("".join(traceback.format_exception(et, ex, tb)))
         except Exception:
             pass
@@ -401,13 +490,16 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-# ---------------- Excel writer (opzionale CLI) ----------------
+
+# --------------------------------------------------
+# Excel writer (opzionale CLI)
+# --------------------------------------------------
 def save_excel(records: List[Dict[str, Any]], path: str):
     import pandas as pd
     from openpyxl.utils import get_column_letter
 
     if not records:
-        df = pd.DataFrame(columns=["title","price","acres","link","status"])
+        df = pd.DataFrame(columns=["title", "price", "acres", "link", "status"])
     else:
         df = pd.DataFrame(records)
 
@@ -420,14 +512,19 @@ def save_excel(records: List[Dict[str, Any]], path: str):
         for idx, _ in enumerate(df.columns, start=1):
             ws.column_dimensions[get_column_letter(idx)].width = 19
 
-# ---------------- Wrapper orchestratore ----------------
+
+# --------------------------------------------------
+# Wrapper orchestratore
+# --------------------------------------------------
 import pandas as pd
+
 
 def _num(x):
     try:
         return float(re.sub(r"[^0-9.\-]", "", str(x)))
     except Exception:
         return None
+
 
 def _to_df(listings: List[Dict[str, Any]], *, state: str, county: str, status_label: str, period: Optional[str]):
     rows = []
@@ -440,20 +537,34 @@ def _to_df(listings: List[Dict[str, Any]], *, state: str, county: str, status_la
         acres_num = _num(acres_txt)
         ppa = (price_num / acres_num) if (price_num and acres_num and acres_num > 0) else None
         price_fmt = f"${price_num:,.0f}" if price_num is not None else (price_txt or "")
-        rows.append({
-            "Price": price_fmt,
-            "Acres": acres_num,
-            "Price_per_Acre": ppa,
-            "Location": loc,
-            "Link": link,
-            "Status": status_label,
-            "County": county,
-            "State": state,
-            "Period": period or ""
-        })
-    return pd.DataFrame(rows, columns=[
-        "Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"
-    ])
+        rows.append(
+            {
+                "Price": price_fmt,
+                "Acres": acres_num,
+                "Price_per_Acre": ppa,
+                "Location": loc,
+                "Link": link,
+                "Status": status_label,
+                "County": county,
+                "State": state,
+                "Period": period or "",
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "Price",
+            "Acres",
+            "Price_per_Acre",
+            "Location",
+            "Link",
+            "Status",
+            "County",
+            "State",
+            "Period",
+        ],
+    )
+
 
 def run_scrape(
     *,
@@ -478,23 +589,28 @@ def run_scrape(
     parts: List[pd.DataFrame] = []
 
     if include_forsale:
-        listings_fs = scrape_realtor(RealtorParams(
-            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=False
-        ))
+        listings_fs = scrape_realtor(
+            RealtorParams(state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=False)
+        )
         parts.append(_to_df(listings_fs, state=state, county=county, status_label="For Sale", period=period))
 
     if include_sold:
-        listings_sd = scrape_realtor(RealtorParams(
-            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=True
-        ))
+        listings_sd = scrape_realtor(
+            RealtorParams(state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=True)
+        )
         parts.append(_to_df(listings_sd, state=state, county=county, status_label="Sold", period=period))
 
     if not parts:
-        return pd.DataFrame(columns=["Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"])
+        return pd.DataFrame(
+            columns=["Price", "Acres", "Price_per_Acre", "Location", "Link", "Status", "County", "State", "Period"]
+        )
 
     return pd.concat(parts, ignore_index=True)
 
-# ---------------- CLI test ----------------
+
+# --------------------------------------------------
+# CLI (per test manuali nel container)
+# --------------------------------------------------
 if __name__ == "__main__":
     if len(sys.argv) >= 6:
         state = sys.argv[1]
@@ -502,7 +618,7 @@ if __name__ == "__main__":
         min_ac = sys.argv[3]
         max_ac = sys.argv[4]
         mode = sys.argv[5].lower()
-        sold = (mode == "sold")
+        sold = mode == "sold"
         recs = scrape_realtor(RealtorParams(state=state, county=county, acres_min=min_ac, acres_max=max_ac, sold=sold))
         out = os.path.join(RESULTS_BASE, "realtor_results.xlsx")
         save_excel(recs, out)
