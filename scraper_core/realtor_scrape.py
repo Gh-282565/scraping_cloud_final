@@ -2,9 +2,9 @@
 # Solo patch al modulo Realtor (nessun cambio a app.py/Zillow).
 # Obiettivi:
 # - Tenere l’esecuzione < ~55–60s (evita 502) con BUDGET_SEC.
-# - Consenso più aggressivo (iframe + main + JS).
+# - Consenso più aggressivo (iframe + main + JS) + sblocco forzato overlay.
 # - Wait breve con fallback; 1 solo ciclo di deep scroll.
-# - Parser tollerante (CSS+XPATH+fallback anchor).
+# - Parser tollerante (CSS+XPATH+fallback anchor robusto).
 # - Snapshot diagnostici in più fasi.
 
 import os
@@ -106,12 +106,7 @@ def _snapshot(driver, tag: str):
 
 
 def _click_cookie_consent(driver, timeout: int = 10) -> bool:
-    """
-    Consenso aggressivo: (1) iframe, (2) main, (3) JS click.
-    Cerca varianti di testo/aria-label/data-testid.
-    """
-    end = time.time() + timeout
-
+    """Consenso aggressivo: (1) iframe, (2) main, (3) JS click. Cerca varianti di testo/aria-label/data-testid."""
     TARGET_XPATH = (
         "//button[normalize-space()='Accept All' or normalize-space()='Accept all' or "
         "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept') or "
@@ -175,6 +170,31 @@ def _click_cookie_consent(driver, timeout: int = 10) -> bool:
     except Exception:
         pass
     return False
+
+
+def _force_unblock(driver):
+    """Rimuove overlay/cookie layer se il click non è riuscito."""
+    try:
+        driver.execute_script(
+            """
+            (function(){
+              const sels = [
+                '#onetrust-banner-sdk', '.onetrust-pc-dark-filter', '#truste-consent-track',
+                '.consent', '.cookie', '[aria-modal="true"]', '.modal', '.overlay', '.backdrop'
+              ];
+              for (const s of sels){
+                document.querySelectorAll(s).forEach(el => { try{ el.remove(); }catch(e){} });
+              }
+              const st = document.documentElement.style;
+              const sb = document.body && document.body.style;
+              if (st.overflow==='hidden') st.overflow='auto';
+              if (sb && sb.overflow==='hidden') sb.overflow='auto';
+            })();
+            """
+        )
+        log("[CONSENT] forced unblock overlays")
+    except Exception:
+        pass
 
 
 def _wait_for_results(driver, timeout: int) -> bool:
@@ -327,24 +347,46 @@ def _extract_listings(driver) -> List[Dict[str, Any]]:
                 pass
 
     if not cards:
-        # Fallback minimale: anchor -> parent text
-        anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
+        # Fallback ROBUSTO: prendi tutte le ancore di dettaglio e risali a un contenitore utile.
+        anchors = driver.find_elements(By.XPATH, "//a[contains(@href,'/realestateandhomes-detail/')]")
         for a in anchors:
             try:
                 link = a.get_attribute("href") or ""
-                parent = a.find_element(By.XPATH, "./ancestor::*[position()<=3]")
-                block = parent.text
+                # risali a un contenitore utile (li/article/div) fino a 8 livelli
+                try:
+                    parent = a.find_element(By.XPATH, "./ancestor::li|./ancestor::article|./ancestor::div")
+                except Exception:
+                    parent = a.find_element(By.XPATH, "./ancestor::*[position()<=8]")
+                block = ""
+                try:
+                    block = parent.text
+                except Exception:
+                    block = ""
+                if not block:
+                    aria = a.get_attribute("aria-label") or ""
+                    title = a.get_attribute("title") or ""
+                    block = aria or title
                 price = _first_price(block)
                 acres = _parse_acres_from_text(block)
+                title_txt = (a.text or "").strip() or (block or "")[:80]
                 listings.append({
-                    "title": a.text.strip(),
+                    "title": title_txt,
                     "price": price,
                     "acres": acres,
                     "link": link,
                     "status": "",
                 })
             except Exception:
-                pass
+                try:
+                    listings.append({
+                        "title": (a.text or "").strip(),
+                        "price": "",
+                        "acres": "",
+                        "link": a.get_attribute("href") or "",
+                        "status": "",
+                    })
+                except Exception:
+                    pass
         return listings
 
     for el in cards:
@@ -470,6 +512,9 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
 
         clicked = _click_cookie_consent(driver, timeout=min(8, max(3, int(time_left()/4))))
         log(f"[CONSENT] clicked={clicked}")
+        if not clicked:
+            _force_unblock(driver)
+        time.sleep(0.5)
         _snapshot(driver, "after_consent")
 
         if QUICK_EXIT:
