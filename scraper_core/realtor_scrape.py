@@ -175,6 +175,7 @@ def _click_cookie_consent(driver, timeout: int = 10) -> bool:
 def _force_unblock(driver):
     """Rimuove overlay/cookie layer se il click non è riuscito."""
     try:
+        log("[UNBLOCK] Provo a forzare la rimozione di eventuali overlay")
         driver.execute_script(
             """
             (function(){
@@ -192,9 +193,27 @@ def _force_unblock(driver):
             })();
             """
         )
-        log("[CONSENT] forced unblock overlays")
-    except Exception:
-        pass
+        _snapshot(driver, "after_consent_unblock")
+    except Exception as e:
+        log(f"[UNBLOCK][ERR] {e}")
+        _snapshot(driver, "after_consent_unblock_err")
+
+
+def _safe_get(driver, url, tries: int = 2) -> bool:
+    """
+    Carica l'URL con qualche retry e snapshot diagnostici.
+    """
+    for attempt in range(1, tries + 1):
+        try:
+            log(f"[GET] try {attempt}: {url}")
+            driver.get(url)
+            _snapshot(driver, f"after_get_t{attempt}")
+            return True
+        except Exception as e:
+            log(f"[GET][ERR] attempt {attempt}: {e}")
+            _snapshot(driver, f"after_get_err_t{attempt}")
+    log(f"[GET][FAIL] giving up after {tries} attempts")
+    return False
 
 
 def _wait_for_results(driver, timeout: int) -> bool:
@@ -506,7 +525,9 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         url = _url_for(params.state, params.county, params.acres_min, params.acres_max, sold=params.sold)
         log(f"[URL] {url}")
 
-        driver.get(url)
+        if not _safe_get(driver, url, tries=2):
+            log("[ABORT] Impossibile caricare la pagina Realtor, esco.")
+            return []
         time.sleep(1.5)
         _snapshot(driver, "after_get")
 
@@ -630,7 +651,7 @@ def _to_df(listings: List[Dict[str, Any]], *, state: str, county: str, status_la
         )
     return pd.DataFrame(
         rows,
-        columns=[
+        columns[
             "Price",
             "Acres",
             "Price_per_Acre",
