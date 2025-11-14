@@ -381,7 +381,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         if not _safe_get(driver, url, tries=2, pause=2.0):
             return []
 
-        # cookie consent (USARE la funzione rimasta in alto, iframe-aware)
+        # cookie consent
         clicked = _click_cookie_consent(driver)
         log(f"[CONSENT] clicked={clicked}")
         if not clicked:
@@ -395,15 +395,14 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-        # attendi comparsa risultati; se nulla, scroll profondo e riattendi
-        if not _wait_for_results(driver, timeout=25):
-            _progressive_scroll(driver, steps=8, pause=0.7)
-            if not _wait_for_results(driver, timeout=25):
-                _snapshot(driver, "zero_results")
-                return []
+        # Attesa soft: se non trova indicatori, comunque procediamo
+        found = _wait_for_results(driver, timeout=25)
+        if not found:
+            log("[WAIT] nessun indicatore risultati; continuo con scroll e parse.")
 
         # scroll profondo per far materializzare tutte le card lazy
         _progressive_scroll(driver, steps=8, pause=0.7)
+
         # --- DIAGNOSTICA SELETTORI CARD (prima del parsing) ---
         from selenium.webdriver.common.by import By
         SELECTORS = [
@@ -414,7 +413,6 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
             "ul[data-testid='results-list'] article",
             "div[data-testid='search-result-list'] article",
             "div[class^='BasePropertyCard_propertyCardWrap__'] article",
-  
         ]
 
         for s in SELECTORS:
@@ -429,6 +427,12 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         except Exception as e:
             log("[RESULT] Errore in _extract_listings:", e)
             listings = []
+
+        if not listings:
+            try:
+                _snapshot(driver, "zero_results")
+            except Exception:
+                pass
 
         log(f"[RESULT] Trovate {len(listings)} card.")
         return listings
@@ -478,6 +482,8 @@ def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
     Wrapper compatibile con il tuo scraper_core/scraper.py:
     - state, county, acres_min, acres_max, include_forsale, include_sold, period
     Ritorna un DataFrame già pronto da scrivere in Excel.
+    Il parametro headless e **kwargs servono solo per compatibilità e vengono ignorati,
+    perché la modalità è gestita da REALTOR_FAST/UC.
     """
     parts = []
 
