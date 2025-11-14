@@ -473,7 +473,7 @@ def _to_df(records: List[Dict[str, Any]], state: str, county: str, status_label:
 
 def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
                include_forsale: bool = True, include_sold: bool = False,
-               period: str = "12M") -> pd.DataFrame:
+               period: str = "12M", headless: bool = True, **kwargs) -> pd.DataFrame:
     """
     Wrapper compatibile con il tuo scraper_core/scraper.py:
     - state, county, acres_min, acres_max, include_forsale, include_sold, period
