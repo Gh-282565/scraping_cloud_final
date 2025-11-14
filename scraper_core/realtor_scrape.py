@@ -651,7 +651,7 @@ def _to_df(listings: List[Dict[str, Any]], *, state: str, county: str, status_la
         )
     return pd.DataFrame(
         rows,
-        columns[
+        columns=[
             "Price",
             "Acres",
             "Price_per_Acre",
