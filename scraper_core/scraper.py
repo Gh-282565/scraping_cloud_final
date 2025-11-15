@@ -245,17 +245,26 @@ def run_scraping(
             fn_r = getattr(realtor_scrape, "run_scrape", None) or getattr(realtor_scrape, "run", None)
             if not callable(fn_r):
                 raise AttributeError("realtor_scrape non espone run_scrape/run.")
+
             df_r = _to_df(fn_r(**kwargs))
-            if df_r is not None and not df_r.empty:
+
+            if df_r is None:
+                # Nessun dato proprio: errore logico lato scraper
+                messages.append("[ERR] Realtor ha restituito None (nessun DataFrame).")
+            else:
+                # Normalizzo sempre e CREO SEMPRE un file, anche se vuoto
                 df_r = _normalize(df_r, "Realtor")
                 outpath_r = os.path.join(results_dir, f"realtor_risultati_estrazione_{tag}.xlsx")
                 _save_excel(df_r, outpath_r, "Realtor")
                 produced_paths.append(outpath_r)
-                messages.append("[OK] File Realtor creato.")
-            else:
-                messages.append("[WARN] Nessun risultato Realtor.")
+
+                if df_r.empty:
+                    messages.append("[WARN] Nessun risultato Realtor (file vuoto creato).")
+                else:
+                    messages.append("[OK] File Realtor creato.")
         except Exception as e:
             messages.append(f"[ERR] Realtor: {e}")
+
 
     # Zillow
     if "zillow" in [s.lower() for s in (use_sources or [])] and zillow_scrape is not None:
