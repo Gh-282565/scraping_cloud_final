@@ -1,4 +1,4 @@
-# today_realtor_scrape_PATCH_FAST_REGEX.py
+# today_realtor_scrape_PATCH_FAST_REGEX_V3.py
 
 # ----------------------------------------------------------------------
 # Cookie consent (iframe-aware) + forza sblocco overlay
@@ -126,6 +126,11 @@ def _progressive_scroll(driver, steps=8, pause=0.7):
     for i in range(steps):
         driver.execute_script("window.scrollBy(0, document.body.scrollHeight * 0.25);")
         time.sleep(pause)
+        try:
+            _force_unblock(driver)
+            time.sleep(0.3)
+        except Exception:
+            pass
 
 
 # ----------------------------------------------------------------------
@@ -144,25 +149,19 @@ def _snapshot(driver, tag):
         print("[SNAP] Error saving snapshot:", e)
 
 
-def _safe_get(driver, url, tries=2, pause=2.0):
-    """Navigazione robusta con retry e snapshot after_get_t1/after_get_t2."""
+def _safe_get(driver, url, tries=3, pause=3.5):
+    """Navigazione robusta con retry e snapshot."""
     last_err = None
     for i in range(1, tries + 1):
         try:
             log(f"[GET] try={i} url={url}")
             driver.get(url)
             time.sleep(pause)
-            try:
-                _snapshot(driver, f"after_get_t{i}")
-            except Exception:
-                pass
+            _snapshot(driver, f"after_get_t{i}")
             return True
-        except WebDriverException as e:
-            last_err = e
-            log(f"[GET][ERR] try={i} -> {e}")
         except Exception as e:
             last_err = e
-            log(f"[GET][ERR-UNK] try={i} -> {e}")
+            log(f"[GET][ERR] try={i} -> {e}")
     log(f"[GET][FAIL] url={url} err={last_err}")
     return False
 
@@ -189,7 +188,7 @@ def _wait_for_results(driver, timeout=25):
 
 
 # ----------------------------------------------------------------------
-# Parser standard + funzioni utili
+# Parser DOM + fallback regex
 # ----------------------------------------------------------------------
 def _first_price(text):
     m = re.search(r"\$[\d,]+", text or "")
@@ -206,23 +205,19 @@ def _parse_acres_from_text(text):
     if m:
         try:
             return float(m.group(1).replace(",", ""))
-        except Exception:
+        except:
             return None
     m = re.search(r"([\d.,]+)\s*(square feet|sqft|sq\.ft)", t)
     if m:
         try:
             sqft = float(m.group(1).replace(",", ""))
             return sqft / 43560.0
-        except Exception:
+        except:
             return None
     return None
 
 
 def _extract_listings(driver):
-    """
-    Parser DOM “classico”.
-    Se fallisce o non trova nulla, useremo un fallback regex su page_source.
-    """
     listings = []
 
     cards = driver.find_elements(
@@ -244,7 +239,7 @@ def _extract_listings(driver):
                 if els:
                     cards = els
                     break
-            except Exception:
+            except:
                 pass
 
     if not cards:
@@ -254,51 +249,57 @@ def _extract_listings(driver):
     for el in cards:
         try:
             title = ""
-            for sel in [("css","[data-testid='card-title']"), ("css","h3"), ("css","h2"), ("xpath",".//h3|.//h2")]:
+            for sel in [
+                ("css","[data-testid='card-title']"),
+                ("css","h3"), ("css","h2"),
+                ("xpath",".//h3|.//h2")
+            ]:
                 try:
-                    if sel[0] == "css":
-                        cand = el.find_elements(By.CSS_SELECTOR, sel[1])
-                    else:
-                        cand = el.find_elements(By.XPATH, sel[1])
+                    cand = el.find_elements(
+                        By.CSS_SELECTOR if sel[0]=="css" else By.XPATH,
+                        sel[1]
+                    )
                     if cand:
                         title = cand[0].text.strip()
                         break
-                except Exception:
+                except:
                     pass
 
             price = ""
-            for sel in [("css","[data-testid='card-price']"),
-                        ("css","span[data-label='pc-price']"),
-                        ("css","span[data-testid*='price']"),
-                        ("css","span[class*='price']"),
-                        ("xpath",".//*[contains(text(),'$')]")]:
+            for sel in [
+                ("css","[data-testid='card-price']"),
+                ("css","span[data-label='pc-price']"),
+                ("css","span[data-testid*='price']"),
+                ("css","span[class*='price']"),
+                ("xpath",".//*[contains(text(),'$')]")
+            ]:
                 try:
-                    if sel[0] == "css":
-                        cand = el.find_elements(By.CSS_SELECTOR, sel[1])
-                    else:
-                        cand = el.find_elements(By.XPATH, sel[1])
+                    cand = el.find_elements(
+                        By.CSS_SELECTOR if sel[0]=="css" else By.XPATH,
+                        sel[1]
+                    )
                     if cand:
                         price = _first_price(cand[0].text)
                         if price:
                             break
-                except Exception:
+                except:
                     pass
 
             acres = None
             try:
                 acres = _parse_acres_from_text(el.text)
-            except Exception:
+            except:
                 pass
 
             link = ""
             try:
                 a = el.find_element(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
                 link = a.get_attribute("href")
-            except Exception:
+            except:
                 try:
                     a = el.find_element(By.XPATH, ".//a[contains(@href,'/realestateandhomes-detail/')]")
                     link = a.get_attribute("href")
-                except Exception:
+                except:
                     pass
 
             listings.append({
@@ -321,7 +322,7 @@ def _url_for(state_abbr, county_name, acres_min, acres_max, sold=False):
     try:
         acres_min = float(acres_min)
         acres_max = float(acres_max)
-    except Exception:
+    except:
         acres_min = 0.0
         acres_max = 0.0
 
@@ -346,7 +347,7 @@ def _url_for(state_abbr, county_name, acres_min, acres_max, sold=False):
 
 
 # ----------------------------------------------------------------------
-# Core scrape + nuovo fallback regex
+# Core scrape
 # ----------------------------------------------------------------------
 @dataclass
 class RealtorParams:
@@ -358,20 +359,13 @@ class RealtorParams:
 
 
 def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
-    """
-    Nuovo approccio:
-    1) Carica pagina + consent/unblock
-    2) Scroll
-    3) TENTA parse DOM (_extract_listings)
-    4) SE 0 risultati -> fallback regex su page_source per estrarre link degli annunci
-    """
     log("[REALTOR][VER] run_scrape wrapper attivo (V3_REGEX)")
 
     if USE_FAST_UC:
         log("[DRIVER] FAST UC attivo (ambiente test).")
         driver = _build_fast_uc_driver()
     else:
-        log("[DRIVER] Shared driver_factory.get_driver()")
+        log("[DRIVER] shared driver_factory.get_driver()")
         get_driver = _import_driver_factory()
         driver = get_driver(headless=True, for_realtor=True)
 
@@ -379,7 +373,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         url = _url_for(params.state, params.county, params.acres_min, params.acres_max, sold=params.sold)
         log("[URL]", url)
 
-        if not _safe_get(driver, url, tries=2, pause=2.0):
+        if not _safe_get(driver, url, tries=2, pause=2.5):
             return []
 
         clicked = _click_cookie_consent(driver)
@@ -390,29 +384,25 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
                 time.sleep(0.5)
             except Exception as e:
                 log(f"[UNBLOCK][ERR] {e}")
-        try:
-            _snapshot(driver, "after_consent")
-        except Exception:
-            pass
 
-        # Solo diagnostica: non usiamo più _wait_for_results per decidere il fallimento
+        _snapshot(driver, "after_consent")
+
         found = _wait_for_results(driver, timeout=25)
         if not found:
-            log("[WAIT] nessun indicatore risultati; continuo con scroll e parse DOM+regex.")
+            log("[WAIT] nessun indicatore; continuo con scroll e DOM+regex.")
 
         _progressive_scroll(driver, steps=8, pause=0.7)
 
         try:
             title = driver.title
-        except Exception:
+        except:
             title = ""
         try:
             html_len = len(driver.page_source or "")
-        except Exception:
+        except:
             html_len = -1
         log(f"[PAGE] title='{title}' len={html_len}")
 
-        # Diagnostica selettori
         SELECTORS = [
             "article[data-testid='property-card']",
             "section[data-testid='property-card']",
@@ -429,14 +419,13 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
             except Exception as e:
                 log(f"[CHECK][ERR] {s} -> {e}")
 
-        # 1) Parser DOM “classico”
+        listings = []
         try:
             listings = _extract_listings(driver)
         except Exception as e:
             log("[RESULT] Errore in _extract_listings:", e)
-            listings = []
 
-        # 2) Fallback completamente diverso: regex su HTML per link annunci
+        # Fallback regex
         if not listings:
             try:
                 html = driver.page_source or ""
@@ -444,7 +433,6 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
                     r"https://www\.realtor\.com/realestateandhomes-detail/[^\\"']+",
                     html
                 )
-                # dedup preservando ordine
                 seen = set()
                 uniq_urls = []
                 for u in urls:
@@ -466,10 +454,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
                 log(f"[FALLBACK-LINKS][ERR] {e}")
 
         if not listings:
-            try:
-                _snapshot(driver, "zero_results")
-            except Exception:
-                pass
+            _snapshot(driver, "zero_results")
 
         log(f"[RESULT] Trovate {len(listings)} card (DOM+regex).")
         return listings
@@ -477,17 +462,18 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
     finally:
         try:
             driver.quit()
-        except Exception:
+        except:
             pass
 
 
 # ----------------------------------------------------------------------
-# Wrapper per la pipeline esistente
+# Wrapper: restituisce SOLO un DataFrame (non più file)
 # ----------------------------------------------------------------------
 import pandas as pd
 
 def _to_df(records: List[Dict[str, Any]], state: str, county: str,
            status_label: str, period: str) -> pd.DataFrame:
+
     if not records:
         return pd.DataFrame(columns=[
             "Price","Acres","Price_per_Acre","Location","Link",
@@ -521,28 +507,41 @@ def _to_df(records: List[Dict[str, Any]], state: str, county: str,
 
 def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
                include_forsale: bool = True, include_sold: bool = False,
-               period: str = "12M", headless: bool = True, **kwargs) -> str:
+               period: str = "12M", headless: bool = True, **kwargs) -> pd.DataFrame:
     """
-    Restituisce SEMPRE il percorso file XLSX generato.
-    Compatibile con scraper_core/scraper.py.
+    Restituisce SEMPRE un DataFrame.
+    La creazione del file Excel viene fatta da scraper.py.
     """
     parts = []
 
     if include_forsale:
         listings_fs = scrape_realtor(RealtorParams(
-            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=False
+            state=state, county=county,
+            acres_min=acres_min, acres_max=acres_max,
+            sold=False
         ))
-        parts.append(_to_df(listings_fs, state=state, county=county,
-                            status_label="For Sale", period=period))
+        parts.append(_to_df(
+            listings_fs,
+            state=state,
+            county=county,
+            status_label="For Sale",
+            period=period
+        ))
 
     if include_sold:
         listings_sd = scrape_realtor(RealtorParams(
-            state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=True
+            state=state, county=county,
+            acres_min=acres_min, acres_max=acres_max,
+            sold=True
         ))
-        parts.append(_to_df(listings_sd, state=state, county=county,
-                            status_label="Sold", period=period))
+        parts.append(_to_df(
+            listings_sd,
+            state=state,
+            county=county,
+            status_label="Sold",
+            period=period
+        ))
 
-    # Nessun risultato? Restituiamo un file vuoto ma valido
     if not parts:
         df = pd.DataFrame(columns=[
             "Price","Acres","Price_per_Acre","Location","Link",
@@ -551,11 +550,5 @@ def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
     else:
         df = pd.concat(parts, ignore_index=True)
 
-    # Salvataggio file
-    os.makedirs("/app/results", exist_ok=True)
-    out_path = f"/app/results/realtor_{state}_{county}_{period}.xlsx"
-    df.to_excel(out_path, index=False)
-
-    log(f"[REALTOR][SAVE] File generato: {out_path}")
-    return out_path
-
+    log(f"[REALTOR][RUN_SCRAPE] restituisco DF con {len(df)} righe.")
+    return df
