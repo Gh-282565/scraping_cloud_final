@@ -521,10 +521,10 @@ def _to_df(records: List[Dict[str, Any]], state: str, county: str,
 
 def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
                include_forsale: bool = True, include_sold: bool = False,
-               period: str = "12M", headless: bool = True, **kwargs) -> pd.DataFrame:
+               period: str = "12M", headless: bool = True, **kwargs) -> str:
     """
-    Wrapper compatibile con scraper_core/scraper.py.
-    headless e **kwargs sono ignorati: la modalità è gestita da REALTOR_FAST.
+    Restituisce SEMPRE il percorso file XLSX generato.
+    Compatibile con scraper_core/scraper.py.
     """
     parts = []
 
@@ -542,10 +542,20 @@ def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
         parts.append(_to_df(listings_sd, state=state, county=county,
                             status_label="Sold", period=period))
 
+    # Nessun risultato? Restituiamo un file vuoto ma valido
     if not parts:
-        return pd.DataFrame(columns=[
+        df = pd.DataFrame(columns=[
             "Price","Acres","Price_per_Acre","Location","Link",
             "Status","County","State","Period"
         ])
+    else:
+        df = pd.concat(parts, ignore_index=True)
 
-    return pd.concat(parts, ignore_index=True)
+    # Salvataggio file
+    os.makedirs("/app/results", exist_ok=True)
+    out_path = f"/app/results/realtor_{state}_{county}_{period}.xlsx"
+    df.to_excel(out_path, index=False)
+
+    log(f"[REALTOR][SAVE] File generato: {out_path}")
+    return out_path
+
