@@ -1,8 +1,8 @@
-# today_realtor_scrape_PATCH_FAST.py
-# Drop-in per testare Realtor con lo STESSO approccio driver dell'ambiente test (UC FAST MODE)
-# Toggle via env: REALTOR_FAST=1 (default) => usa driver locale UC ottimizzato
-#                   REALTOR_FAST=0         => delega a driver_factory.get_driver() (condiviso con Zillow)
-# PATCH 1: robust consent click (iframe-aware)
+# today_realtor_scrape_PATCH_FAST_REGEX.py
+
+# ----------------------------------------------------------------------
+# Cookie consent (iframe-aware) + forza sblocco overlay
+# ----------------------------------------------------------------------
 def _click_cookie_consent(driver):
     try:
         driver.implicitly_wait(2)
@@ -10,7 +10,10 @@ def _click_cookie_consent(driver):
         for f in iframes:
             try:
                 driver.switch_to.frame(f)
-                btns = driver.find_elements("xpath", "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]")
+                btns = driver.find_elements(
+                    "xpath",
+                    "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]"
+                )
                 if btns:
                     btns[0].click()
                     driver.switch_to.default_content()
@@ -20,7 +23,10 @@ def _click_cookie_consent(driver):
             except Exception:
                 driver.switch_to.default_content()
         # fallback on main doc
-        btns = driver.find_elements("xpath", "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]")
+        btns = driver.find_elements(
+            "xpath",
+            "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'accept')]"
+        )
         if btns:
             btns[0].click()
             print("[CONSENT] Clicked on main doc")
@@ -29,70 +35,85 @@ def _click_cookie_consent(driver):
         print("[CONSENT] No banner or failed:", e)
     driver.switch_to.default_content()
     return False
-# Funzioni chiave:
-# - _build_fast_uc_driver(): riprende le ottimizzazioni del vecchio ambiente test (pageLoadStrategy=eager, immagini OFF, headless)
-# - _wait_for_results(): attesa tollerante (CSS + XPATH legacy)
-# - _extract_listings(): parser robusto con fallback multipli
-# - _progressive_scroll(): scroll in 2 fasi (sblocco lazy-load)
-#
-# Uso rapido (standalone):
-#   python today_realtor_scrape_PATCH_FAST.py GA Appling 0 5 forsale
-# Genera: results/realtor_results.xlsx
-#
-# Integrazione con la tua app:
-# - Temporaneamente importa e usa scrape_realtor() di questo file.
-# - Oppure copia _build_fast_uc_driver / _wait_for_results / _extract_listings nel tuo today_realtor_scrape.py
-#   e sostituisci la creazione driver con la logica REALTOR_FAST.
 
-import os, time, math, sys, traceback
+
+def _force_unblock(driver):
+    """Forza la rimozione/silenziamento di overlay o modal che possono coprire i risultati."""
+    try:
+        js = """(function(){
+            const selectors = [
+                'div[aria-modal="true"]',
+                'div[role="dialog"]',
+                'div[class*="modal"]',
+                'div[class*="overlay"]',
+                'section[class*="overlay"]'
+            ];
+            let removed = 0;
+            selectors.forEach(sel => {
+                document.querySelectorAll(sel).forEach(el => {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.removeAttribute('aria-modal');
+                    removed++;
+                });
+            });
+            return removed;
+        })();"""
+        removed = driver.execute_script(js)
+        log(f"[UNBLOCK] overlay rimossi={removed}")
+    except Exception as e:
+        log(f"[UNBLOCK][ERR] {e}")
+
+
+# ----------------------------------------------------------------------
+# Setup driver & helper comuni
+# ----------------------------------------------------------------------
+import os, time, math, sys, traceback, re
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
-# Toggle FAST vs shared driver
 USE_FAST_UC = bool(int(os.getenv("REALTOR_FAST", "1")))
 
-# Safe imports: UC è richiesto solo se USE_FAST_UC=True
 def _import_uc():
     import undetected_chromedriver as uc
     from selenium.webdriver.chrome.options import Options as ChromeOptions
     return uc, ChromeOptions
 
-# Fallback al driver condiviso se richiesto
+
 def _import_driver_factory():
-    from scraper_core.driver_factory import get_driver  # deve esistere nella tua app
+    from scraper_core.driver_factory import get_driver
     return get_driver
 
-# Helpers Selenium comuni
+
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException, WebDriverException
+from selenium.common.exceptions import WebDriverException
 
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+
 def log(*a):
     print(*a, flush=True)
+print(f"[REALTOR][LOAD] using file {__file__}", flush=True)
+
 
 def _build_fast_uc_driver():
     uc, ChromeOptions = _import_uc()
 
     opts = ChromeOptions()
-    # EAGER: parte a DOM interactive (non attende rete/immagini)
     opts.set_capability("pageLoadStrategy", "eager")
-    # Headless "new"
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1440,1200")
 
-    # Disabilita immagini
     prefs = {
         "profile.default_content_setting_values": {"images": 2},
         "profile.managed_default_content_settings.images": 2
     }
     opts.add_experimental_option("prefs", prefs)
 
-    # User data dir dedicata (persistenza anti-bot soft)
     profile_dir = os.path.join(os.getcwd(), "uc_profile_realtor")
     os.makedirs(profile_dir, exist_ok=True)
     opts.add_argument(f"--user-data-dir={profile_dir}")
@@ -100,13 +121,16 @@ def _build_fast_uc_driver():
     driver = uc.Chrome(options=opts)
     return driver
 
+
 def _progressive_scroll(driver, steps=8, pause=0.7):
     for i in range(steps):
         driver.execute_script("window.scrollBy(0, document.body.scrollHeight * 0.25);")
         time.sleep(pause)
 
-# PATCH 2: extended wait and diagnostic snapshots
-import os, time
+
+# ----------------------------------------------------------------------
+# Snapshot & safe_get
+# ----------------------------------------------------------------------
 from datetime import datetime
 
 def _snapshot(driver, tag):
@@ -119,8 +143,31 @@ def _snapshot(driver, tag):
     except Exception as e:
         print("[SNAP] Error saving snapshot:", e)
 
+
+def _safe_get(driver, url, tries=2, pause=2.0):
+    """Navigazione robusta con retry e snapshot after_get_t1/after_get_t2."""
+    last_err = None
+    for i in range(1, tries + 1):
+        try:
+            log(f"[GET] try={i} url={url}")
+            driver.get(url)
+            time.sleep(pause)
+            try:
+                _snapshot(driver, f"after_get_t{i}")
+            except Exception:
+                pass
+            return True
+        except WebDriverException as e:
+            last_err = e
+            log(f"[GET][ERR] try={i} -> {e}")
+        except Exception as e:
+            last_err = e
+            log(f"[GET][ERR-UNK] try={i} -> {e}")
+    log(f"[GET][FAIL] url={url} err={last_err}")
+    return False
+
+
 def _wait_for_results(driver, timeout=25):
-    from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
 
     SELECTORS = [
@@ -140,65 +187,49 @@ def _wait_for_results(driver, timeout=25):
     except Exception:
         return False
 
+
+# ----------------------------------------------------------------------
+# Parser standard + funzioni utili
+# ----------------------------------------------------------------------
 def _first_price(text):
-    # Estrai token $xxx,xxx
-    import re
     m = re.search(r"\$[\d,]+", text or "")
-    return m.group(0) if m else ""
+    if not m:
+        return ""
+    return m.group(0)
+
 
 def _parse_acres_from_text(text):
-    # Prova a leggere "x.xx acres" oppure calcola da sqft
-    import re
     if not text:
-        return ""
+        return None
     t = text.lower()
-    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*acres?", t)
+    m = re.search(r"([\d.,]+)\s*acres?", t)
     if m:
-        return m.group(1)
-    m2 = re.search(r"([0-9,]+)\s*(sq\.?\s*ft|sqft|square\s*feet)", t)
-    if m2:
-        sqft = int(m2.group(1).replace(",", ""))
-        acres = sqft / 43560.0
-        return f"{acres:.2f}"
-    return ""
+        try:
+            return float(m.group(1).replace(",", ""))
+        except Exception:
+            return None
+    m = re.search(r"([\d.,]+)\s*(square feet|sqft|sq\.ft)", t)
+    if m:
+        try:
+            sqft = float(m.group(1).replace(",", ""))
+            return sqft / 43560.0
+        except Exception:
+            return None
+    return None
+
 
 def _extract_listings(driver):
-        from selenium.webdriver.common.by import By
-
-    SELECTORS = [
-        "article[data-testid='property-card']",
-        "section[data-testid='property-card']",
-        "div[data-testid='property-card']",
-        "li[data-testid='result-card'] article",
-        "ul[data-testid='results-list'] article",
-        "div[data-testid='search-result-list'] article",
-        "div[class^='BasePropertyCard_propertyCardWrap__'] article",
-    ]
-
-    cards = []
-    for s in SELECTORS:
-        els = driver.find_elements(By.CSS_SELECTOR, s)
-        if els:
-            cards.extend(els)
-
-    # deduplica
-    cards = list(dict.fromkeys(cards))
-    log(f"[PARSE] Card trovate (unione selettori): {len(cards)}")
-
-    # ⬇️ qui continua normalmente il tuo codice di parsing
-    # ad esempio:
-    # results = []
-    # for card in cards:
-    #     ... estrai titolo, prezzo, link ecc. ...
-    # return results
-
+    """
+    Parser DOM “classico”.
+    Se fallisce o non trova nulla, useremo un fallback regex su page_source.
+    """
     listings = []
 
-    # Primo tentativo: CSS moderni
-    cards = driver.find_elements(By.CSS_SELECTOR,
-        "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='card']")
+    cards = driver.find_elements(
+        By.CSS_SELECTOR,
+        "[data-testid='component-property-card'], [data-testid='property-card'], article[data-testid*='card']"
+    )
 
-    # Fallback XPATH legacy
     if not cards:
         xp_candidates = [
             "//li[contains(@class,'component_property-card')]",
@@ -217,23 +248,11 @@ def _extract_listings(driver):
                 pass
 
     if not cards:
-        # Ultimo fallback: ancora anchor grezzi
-        anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
-        for a in anchors:
-            try:
-                link = a.get_attribute("href") or ""
-                parent = a.find_element(By.XPATH, "./ancestor::*[position()<=3]")
-                block = parent.text
-                price = _first_price(block)
-                acres = _parse_acres_from_text(block)
-                listings.append({"title": a.text.strip(), "price": price, "acres": acres, "link": link, "status": ""})
-            except Exception:
-                pass
-        return listings
+        log("[RESULT] Nessuna card trovata anche dopo i fallback DOM.")
+        return []
 
     for el in cards:
         try:
-            # titolo
             title = ""
             for sel in [("css","[data-testid='card-title']"), ("css","h3"), ("css","h2"), ("xpath",".//h3|.//h2")]:
                 try:
@@ -247,10 +266,11 @@ def _extract_listings(driver):
                 except Exception:
                     pass
 
-            # prezzo
             price = ""
-            for sel in [("css","[data-testid='card-price']"), ("css","span[data-label='pc-price']"),
-                        ("css","span[data-testid*='price']"), ("css","span[class*='price']"),
+            for sel in [("css","[data-testid='card-price']"),
+                        ("css","span[data-label='pc-price']"),
+                        ("css","span[data-testid*='price']"),
+                        ("css","span[class*='price']"),
                         ("xpath",".//*[contains(text(),'$')]")]:
                 try:
                     if sel[0] == "css":
@@ -258,94 +278,76 @@ def _extract_listings(driver):
                     else:
                         cand = el.find_elements(By.XPATH, sel[1])
                     if cand:
-                        price = cand[0].text.strip()
-                        break
+                        price = _first_price(cand[0].text)
+                        if price:
+                            break
                 except Exception:
                     pass
 
-            # acres
-            acres_text = ""
+            acres = None
             try:
-                lot_els = el.find_elements(By.XPATH, ".//*[contains(translate(text(),'ACRES','acres'),'acres') or contains(translate(text(),'LOT','lot'),'lot')]")
-                if lot_els:
-                    acres_text = lot_els[0].text.strip()
+                acres = _parse_acres_from_text(el.text)
             except Exception:
                 pass
-            acres = _parse_acres_from_text(acres_text)
 
-            # link
             link = ""
-            for sel in [("css","a[data-testid='card-link']"), ("css","a[data-testid*='property-card']"),
-                        ("css","a[href*='/realestateandhomes-detail/']"), ("xpath",".//a[contains(@href,'/realestateandhomes-detail/')]")]:
+            try:
+                a = el.find_element(By.CSS_SELECTOR, "a[href*='/realestateandhomes-detail/']")
+                link = a.get_attribute("href")
+            except Exception:
                 try:
-                    if sel[0] == "css":
-                        cand = el.find_elements(By.CSS_SELECTOR, sel[1])
-                    else:
-                        cand = el.find_elements(By.XPATH, sel[1])
-                    if cand:
-                        link = cand[0].get_attribute("href") or ""
-                        break
+                    a = el.find_element(By.XPATH, ".//a[contains(@href,'/realestateandhomes-detail/')]")
+                    link = a.get_attribute("href")
                 except Exception:
                     pass
-
-            status_text = ""
-            try:
-                st_els = el.find_elements(By.CSS_SELECTOR, "[data-testid*='status'], span[class*='status'], div[class*='status']")
-                if st_els:
-                    status_text = st_els[0].text.strip()
-            except Exception:
-                pass
-
-            if not (price or acres or link):
-                continue
 
             listings.append({
                 "title": title,
                 "price": price,
                 "acres": acres,
                 "link": link,
-                "status": status_text
+                "status": ""
             })
         except Exception as e:
             log(f"[PARSE][CARD][ERR] {e}")
 
     return listings
 
+
+# ----------------------------------------------------------------------
+# URL builder
+# ----------------------------------------------------------------------
 def _url_for(state_abbr, county_name, acres_min, acres_max, sold=False):
-    # Realtor usa sqft nel path: acres -> sqft
-    # 1 acro = 43,560 sqft
     try:
         acres_min = float(acres_min)
         acres_max = float(acres_max)
     except Exception:
-        acres_min, acres_max = 0, 0
-    sqft_min = int(round(acres_min * 43560))
-    sqft_max = int(round(acres_max * 43560))
-    county_slug = county_name.strip().lower().replace(" ", "-")
-    base = f"https://www.realtor.com/realestateandhomes-search/{county_slug}-county_{state_abbr}/type-land/lot-sqft-{sqft_min}-{sqft_max}"
+        acres_min = 0.0
+        acres_max = 0.0
+
+    sqft_min = int(acres_min * 43560)
+    sqft_max = int(acres_max * 43560) if acres_max > 0 else 0
+
+    county_slug = county_name.strip().lower().replace(" ", "-").replace("county", "").strip()
+    state_abbr = state_abbr.strip().upper()
+
+    base = f"https://www.realtor.com/realestateandhomes-search/{county_slug}-county_{state_abbr}/type-land"
+    if sqft_max > 0:
+        base += f"/lot-sqft-{sqft_min}-{sqft_max}"
+    else:
+        base += f"/lot-sqft-{sqft_min}-no-max"
+
     if sold:
-        base += "/sold"
+        base += "?status=recently_sold"
+    else:
+        base += "?status=for_sale"
+
     return base
 
-def save_excel(records: List[Dict[str,Any]], path: str):
-    import pandas as pd
-    from openpyxl.utils import get_column_letter
 
-    if not records:
-        # crea xlsx vuoto con intestazioni
-        df = pd.DataFrame(columns=["title","price","acres","link","status"])
-    else:
-        df = pd.DataFrame(records)
-
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="ForSale")
-        ws = writer.sheets["ForSale"]
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-        for idx, _ in enumerate(df.columns, start=1):
-            ws.column_dimensions[get_column_letter(idx)].width = 19
-
+# ----------------------------------------------------------------------
+# Core scrape + nuovo fallback regex
+# ----------------------------------------------------------------------
 @dataclass
 class RealtorParams:
     state: str
@@ -354,49 +356,63 @@ class RealtorParams:
     acres_max: float
     sold: bool = False
 
-def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
-    driver = None
-    try:
-        if USE_FAST_UC:
-            log("[DRIVER] FAST UC attivo (ambiente test).")
-            driver = _build_fast_uc_driver()
-        else:
-            log("[DRIVER] Driver condiviso (driver_factory).")
-            get_driver = _import_driver_factory()
-            driver = get_driver()
 
+def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
+    """
+    Nuovo approccio:
+    1) Carica pagina + consent/unblock
+    2) Scroll
+    3) TENTA parse DOM (_extract_listings)
+    4) SE 0 risultati -> fallback regex su page_source per estrarre link degli annunci
+    """
+    log("[REALTOR][VER] run_scrape wrapper attivo (V3_REGEX)")
+
+    if USE_FAST_UC:
+        log("[DRIVER] FAST UC attivo (ambiente test).")
+        driver = _build_fast_uc_driver()
+    else:
+        log("[DRIVER] Shared driver_factory.get_driver()")
+        get_driver = _import_driver_factory()
+        driver = get_driver(headless=True, for_realtor=True)
+
+    try:
         url = _url_for(params.state, params.county, params.acres_min, params.acres_max, sold=params.sold)
         log("[URL]", url)
 
-        driver.get(url)
-        import time
-        time.sleep(2)  # piccolo buffer post-navigazione
+        if not _safe_get(driver, url, tries=2, pause=2.0):
+            return []
 
-        # diagnosi post-navigazione
-        try:
-            _snapshot(driver, "after_get")
-        except Exception:
-            pass
-
-        # cookie consent (USARE la funzione rimasta in alto, iframe-aware)
         clicked = _click_cookie_consent(driver)
         log(f"[CONSENT] clicked={clicked}")
+        if not clicked:
+            try:
+                _force_unblock(driver)
+                time.sleep(0.5)
+            except Exception as e:
+                log(f"[UNBLOCK][ERR] {e}")
         try:
             _snapshot(driver, "after_consent")
         except Exception:
             pass
 
-        # attendi comparsa risultati; se nulla, scroll profondo e riattendi
-        if not _wait_for_results(driver, timeout=25):
-            _progressive_scroll(driver, steps=8, pause=0.7)
-            if not _wait_for_results(driver, timeout=25):
-                _snapshot(driver, "zero_results")
-                return []
+        # Solo diagnostica: non usiamo più _wait_for_results per decidere il fallimento
+        found = _wait_for_results(driver, timeout=25)
+        if not found:
+            log("[WAIT] nessun indicatore risultati; continuo con scroll e parse DOM+regex.")
 
-        # scroll profondo per far materializzare tutte le card lazy
         _progressive_scroll(driver, steps=8, pause=0.7)
-        # --- DIAGNOSTICA SELETTORI CARD (prima del parsing) ---
-        from selenium.webdriver.common.by import By
+
+        try:
+            title = driver.title
+        except Exception:
+            title = ""
+        try:
+            html_len = len(driver.page_source or "")
+        except Exception:
+            html_len = -1
+        log(f"[PAGE] title='{title}' len={html_len}")
+
+        # Diagnostica selettori
         SELECTORS = [
             "article[data-testid='property-card']",
             "section[data-testid='property-card']",
@@ -405,9 +421,7 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
             "ul[data-testid='results-list'] article",
             "div[data-testid='search-result-list'] article",
             "div[class^='BasePropertyCard_propertyCardWrap__'] article",
-  
         ]
-
         for s in SELECTORS:
             try:
                 n = len(driver.find_elements(By.CSS_SELECTOR, s))
@@ -415,113 +429,123 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str,Any]]:
             except Exception as e:
                 log(f"[CHECK][ERR] {s} -> {e}")
 
+        # 1) Parser DOM “classico”
         try:
-            _snapshot(driver, "after_scroll_diag")
-        except Exception:
-            pass
+            listings = _extract_listings(driver)
+        except Exception as e:
+            log("[RESULT] Errore in _extract_listings:", e)
+            listings = []
 
-        data = _extract_listings(driver)
-        log(f"[RESULT] Trovate {len(data)} card.")
-        return data
+        # 2) Fallback completamente diverso: regex su HTML per link annunci
+        if not listings:
+            try:
+                html = driver.page_source or ""
+                urls = re.findall(
+                    r"https://www\.realtor\.com/realestateandhomes-detail/[^\\"']+",
+                    html
+                )
+                # dedup preservando ordine
+                seen = set()
+                uniq_urls = []
+                for u in urls:
+                    if u not in seen:
+                        seen.add(u)
+                        uniq_urls.append(u)
+                log(f"[FALLBACK-LINKS] trovate {len(uniq_urls)} URL annuncio da regex.")
+                listings = [
+                    {
+                        "title": "",
+                        "price": "",
+                        "acres": None,
+                        "link": u,
+                        "status": ""
+                    }
+                    for u in uniq_urls
+                ]
+            except Exception as e:
+                log(f"[FALLBACK-LINKS][ERR] {e}")
+
+        if not listings:
+            try:
+                _snapshot(driver, "zero_results")
+            except Exception:
+                pass
+
+        log(f"[RESULT] Trovate {len(listings)} card (DOM+regex).")
+        return listings
+
     finally:
         try:
-            if driver:
-                driver.quit()
+            driver.quit()
         except Exception:
             pass
 
-if __name__ == "__main__":
-    # CLI: python today_realtor_scrape_PATCH_FAST.py GA Appling 0 5 forsale
-    if len(sys.argv) >= 6:
-        state = sys.argv[1]
-        county = sys.argv[2]
-        min_ac = sys.argv[3]
-        max_ac = sys.argv[4]
-        mode = sys.argv[5].lower()
-        sold = (mode == "sold")
-        recs = scrape_realtor(RealtorParams(state=state, county=county, acres_min=min_ac, acres_max=max_ac, sold=sold))
-        out = os.path.join(RESULTS_DIR, "realtor_results.xlsx")
-        save_excel(recs, out)
-        print(f"[OK] Salvato: {out}")
-    else:
-        print("Uso: python today_realtor_scrape_PATCH_FAST.py <STATE> <County Name> <min acres> <max acres> <forsale|sold>")
-# --- WRAPPER per orchestratore GUI: espone run_scrape() come da contratto ---
 
-import re
+# ----------------------------------------------------------------------
+# Wrapper per la pipeline esistente
+# ----------------------------------------------------------------------
 import pandas as pd
 
-def _num(x):
-    try:
-        return float(re.sub(r"[^0-9.\-]", "", str(x)))
-    except Exception:
-        return None
-
-def _to_df(listings, *, state, county, status_label, period):
-    """
-    listings: lista di dict come {"title","price","acres","link","status"}
-    Ritorna DF con colonne standard attese dalla GUI:
-    Price, Acres, Price_per_Acre, Location, Link, Status, County, State, Period
-    """
+def _to_df(records: List[Dict[str, Any]], state: str, county: str,
+           status_label: str, period: str) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(columns=[
+            "Price","Acres","Price_per_Acre","Location","Link",
+            "Status","County","State","Period"
+        ])
     rows = []
-    for r in listings:
-        price_txt = r.get("price")
-        acres_txt = r.get("acres")
-        link = r.get("link")
-        loc = r.get("title") or r.get("location") or ""
-        price_num = _num(price_txt)
-        acres_num = _num(acres_txt)
-        ppa = (price_num / acres_num) if (price_num and acres_num and acres_num > 0) else None
-        # format prezzo in USD se numerico
-        price_fmt = f"${price_num:,.0f}" if price_num is not None else (price_txt or "")
+    for r in records:
+        price_str = r.get("price") or ""
+        p_clean = "".join(ch for ch in price_str if ch.isdigit() or ch == ".")
+        price_val = float(p_clean) if p_clean else None
+
+        acres = r.get("acres")
+        if price_val is not None and acres not in (None, 0):
+            ppa = price_val / acres
+        else:
+            ppa = None
+
         rows.append({
-            "Price": price_fmt,
-            "Acres": acres_num,
+            "Price": price_val,
+            "Acres": acres,
             "Price_per_Acre": ppa,
-            "Location": loc,
-            "Link": link,
+            "Location": r.get("title") or "",
+            "Link": r.get("link") or "",
             "Status": status_label,
             "County": county,
             "State": state,
-            "Period": period or ""
+            "Period": period
         })
-    return pd.DataFrame(rows, columns=[
-        "Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"
-    ])
+    return pd.DataFrame(rows)
 
-def run_scrape(
-    *,
-    state: str,
-    county: str,
-    acres_min: int,
-    acres_max: int,
-    include_forsale: bool,
-    include_sold: bool,
-    headless: bool = True,   # ignorato: il driver interno è già headless/new
-    period: str | None = None,
-) -> pd.DataFrame:
-    """
-    Entry-point richiesto dalla GUI.
-    Chiama lo scraper interno 'scrape_realtor' una o due volte e unisce i risultati in un unico DataFrame.
-    """
-    print("[REALTOR][VER] run_scrape wrapper attivo", flush=True)
 
+def run_scrape(state: str, county: str, acres_min: float, acres_max: float,
+               include_forsale: bool = True, include_sold: bool = False,
+               period: str = "12M", headless: bool = True, **kwargs) -> pd.DataFrame:
+    """
+    Wrapper compatibile con scraper_core/scraper.py.
+    headless e **kwargs sono ignorati: la modalità è gestita da REALTOR_FAST.
+    """
     parts = []
 
-    # For Sale
     if include_forsale:
         listings_fs = scrape_realtor(RealtorParams(
             state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=False
         ))
-        parts.append(_to_df(listings_fs, state=state, county=county, status_label="For Sale", period=period))
+        parts.append(_to_df(listings_fs, state=state, county=county,
+                            status_label="For Sale", period=period))
 
-    # Sold
     if include_sold:
         listings_sd = scrape_realtor(RealtorParams(
             state=state, county=county, acres_min=acres_min, acres_max=acres_max, sold=True
         ))
-        parts.append(_to_df(listings_sd, state=state, county=county, status_label="Sold", period=period))
+        parts.append(_to_df(listings_sd, state=state, county=county,
+                            status_label="Sold", period=period))
 
     if not parts:
-        return pd.DataFrame(columns=["Price","Acres","Price_per_Acre","Location","Link","Status","County","State","Period"])
+        return pd.DataFrame(columns=[
+            "Price","Acres","Price_per_Acre","Location","Link",
+            "Status","County","State","Period"
+        ])
 
     return pd.concat(parts, ignore_index=True)
