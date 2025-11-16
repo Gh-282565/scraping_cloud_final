@@ -203,12 +203,14 @@
 
     <!-- Esiti + link inline (solo quando done == True) -->
     {% if done %}
+      {#  BLOCCO REALTOR DISABILITATO NELLA VERSIONE CLOUD SOLO ZILLOW
       {% if realtor_ready and realtor_url %}
         <div class="alert ok">
           <strong>[OK]</strong> File Realtor creato.
           <a class="download-link" href="{{ realtor_url }}" download>Premi qui per il download ⬇️</a>
         </div>
       {% endif %}
+      #}
       {% if zillow_ready and zillow_url %}
         <div class="alert ok">
           <strong>[OK]</strong> File Zillow creato.
