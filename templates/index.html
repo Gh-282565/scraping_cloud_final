@@ -4,17 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Costo Terreni - Contee USA</title>
+
+  <!-- PWA manifest + colori tema -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#003366">
+
+  <!-- Icona app -->
+  <link rel="icon" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
   <style>
-    /* --- Layout pagina: centro su desktop, fallback mobile --- */
     html, body { height: 100%; margin: 0; }
     body{
-      min-height: 100dvh;                 /* copre anche UI mobile */
+      min-height: 100dvh;
       display: flex;
-      justify-content: center;             /* centro orizzontale */
-      align-items: center;                 /* centro verticale */
-      padding: 16px;                       /* respiro ai bordi */
-      background-color: #f9f9f9;           /* opzionale */
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+      background-color: #f9f9f9;
     }
     .container{
       width: min(900px, 100%);
@@ -22,10 +30,9 @@
       padding: 20px 30px;
       border-radius: 12px;
       box-shadow: 0 0 10px rgba(0,0,0,.1);
-      max-height: calc(100dvh - 32px);     /* evita scroll pagina */
-      overflow: auto;                      /* se necessario, scroll interno */
+      max-height: calc(100dvh - 32px);
+      overflow: auto;
     }
-    /* Schermi piccoli/stretti: allinea in alto e lascia scroll normale */
     @media (max-width: 640px), (max-height: 600px){
       body{ align-items: flex-start; }
       .container{
@@ -41,15 +48,11 @@
       .form-row label{ width: 100px; }
       .btn{ padding: 10px 16px; }
     }
-
-    /* Messaggi flash */
     .messages { list-style:none; padding:0; margin-top:15px; }
     .messages li { padding:8px; border-radius:6px; margin-bottom:5px; }
     .messages li.info { background:#e0f0ff; color:#004488; }
     .messages li.success { background:#d4edda; color:#155724; }
     .messages li.error { background:#f8d7da; color:#721c24; }
-
-    /* Box OK inline con link */
     .alert.ok{
       background:#e8f5e9; color:#1b5e20;
       border:1px solid #c8e6c9; padding:10px 12px;
@@ -57,8 +60,6 @@
     }
     .alert.ok strong{ margin-right:6px; }
     .alert.ok .download-link{ font-weight:600; text-decoration:underline; margin-left:8px; }
-
-    /* Layout form */
     .header{ display:flex; align-items:center; gap:16px; margin-bottom:16px; }
     .logo{ height:48px; }
     .form-row{ display:flex; align-items:center; gap:12px; margin:12px 0; }
@@ -66,23 +67,19 @@
     .input-pair{ display:flex; gap:12px; width:100%; }
     .checks{ display:flex; gap:18px; }
     select, input[type=number]{ padding:10px; width:100%; max-width:340px; }
-
-    /* --- Bottoni azione (centro + secondario a destra) --- */
     .actions{
       display:flex;
-      justify-content:center;   /* centro l’area principale */
+      justify-content:center;
       align-items:center;
-      position:relative;        /* per ancorare il secondario a destra */
+      position:relative;
       margin-top:20px;
       min-height:48px;
     }
     .center-btn{ text-align:center; }
     .side-btn{
       position:absolute;
-      right:0;                  /* bottone "Nuova ricerca" a destra */
+      right:0;
     }
-
-    /* Stili bottoni */
     .btn{
       cursor:pointer;
       border-radius:8px;
@@ -90,7 +87,6 @@
       font-weight:600;
       border:none;
     }
-    /* Bottone principale blu (centrale) */
     .btn-primary{
       background-color:#007bff;
       color:#fff;
@@ -98,8 +94,6 @@
       transition:background-color .2s;
     }
     .btn-primary:hover{ background-color:#0056b3; }
-
-    /* Bottone secondario più piccolo (destro) */
     .btn-secondary.small-btn{
       background:transparent;
       color:#555;
@@ -111,17 +105,16 @@
     .btn-secondary.small-btn:hover{ background-color:#f0f0f0; }
   </style>
 </head>
+
 <body>
   <div class="container">
-    <!-- Header -->
+
     <div class="header">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
       <h1>Ricerca Costo Terreni - Contee USA</h1>
     </div>
 
-    <!-- Form -->
     <form method="POST" action="/run_scraper">
-      <!-- Stato -->
       <div class="form-row">
         <label for="state">Stato:</label>
         <select id="state" name="state" required>
@@ -132,7 +125,6 @@
         </select>
       </div>
 
-      <!-- Contea -->
       <div class="form-row">
         <label for="county">Contea:</label>
         <select id="county" name="county" required>
@@ -140,7 +132,6 @@
         </select>
       </div>
 
-      <!-- Superficie -->
       <div class="form-row">
         <label>Superficie (acri):</label>
         <div class="input-pair">
@@ -149,7 +140,6 @@
         </div>
       </div>
 
-      <!-- Includi -->
       <div class="form-row">
         <label>Includi:</label>
         <div class="checks">
@@ -158,7 +148,6 @@
         </div>
       </div>
 
-      <!-- Periodo -->
       <div class="form-row">
         <label for="period">Periodo:</label>
         <select id="period" name="period">
@@ -170,16 +159,14 @@
         </select>
       </div>
 
-      <!-- Fonti -->
       <div class="form-row">
         <label>Fonti:</label>
         <div class="checks">
-          <!-- <label><input type="checkbox" name="use_realtor"> Realtor</label> -->
+          <!-- Realtor nascosto -->
           <label><input type="checkbox" name="use_zillow"> Zillow</label>
         </div>
       </div>
 
-      <!-- Bottoni -->
       <div class="actions">
         <div class="center-btn">
           <button type="submit" class="btn btn-primary">Avvia Scraping</button>
@@ -190,7 +177,6 @@
       </div>
     </form>
 
-    <!-- Flash -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <ul class="messages">
@@ -201,16 +187,7 @@
       {% endif %}
     {% endwith %}
 
-    <!-- Esiti + link inline (solo quando done == True) -->
     {% if done %}
-      {#  BLOCCO REALTOR DISABILITATO NELLA VERSIONE CLOUD SOLO ZILLOW
-      {% if realtor_ready and realtor_url %}
-        <div class="alert ok">
-          <strong>[OK]</strong> File Realtor creato.
-          <a class="download-link" href="{{ realtor_url }}" download>Premi qui per il download ⬇️</a>
-        </div>
-      {% endif %}
-      #}
       {% if zillow_ready and zillow_url %}
         <div class="alert ok">
           <strong>[OK]</strong> File Zillow creato.
@@ -221,7 +198,6 @@
   </div>
 
   <script>
-    // Popola dinamicamente le contee
     const countiesByState = {{ counties_json | safe }};
     const stateSelect = document.getElementById('state');
     const countySelect = document.getElementById('county');
@@ -237,17 +213,23 @@
       });
     });
 
-    // Bottone "Nuova ricerca": reset campi + pulizia messaggi + redirect /reset
-    (function () {
-      const btn = document.getElementById('btn-reset');
-      if (!btn) return;
-      btn.addEventListener('click', function () {
-        const form = document.querySelector('form');
-        if (form) form.reset();
-        document.querySelectorAll('.alert, .messages, .msg, .notice').forEach(el => el.remove());
-        window.location.replace('/reset');
+    // Reset
+    document.getElementById('btn-reset').addEventListener('click', function () {
+      const form = document.querySelector('form');
+      if (form) form.reset();
+      document.querySelectorAll('.alert, .messages').forEach(el => el.remove());
+      window.location.replace('/reset');
+    });
+
+    // --- PWA: registra il service worker ---
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("/service-worker.js")
+        .then(reg => console.log("[PWA] Service Worker registrato"))
+        .catch(err => console.log("[PWA] Errore SW", err));
       });
-    })();
+    }
   </script>
+
 </body>
 </html>
