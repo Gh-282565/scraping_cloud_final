@@ -86,7 +86,7 @@ def _import_driver_factory():
 
 
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import WebDriverException
+    from selenium.common.exceptions import WebDriverException
 
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -411,6 +411,19 @@ def scrape_realtor(params: RealtorParams) -> List[Dict[str, Any]]:
         except Exception:
             html_len = -1
         log(f"[PAGE] title='{title}' len={html_len}")
+
+        # --------------------------------------------------------------
+        # EARLY EXIT: HTML troppo corto = probabilmente pagina bloccata/stub
+        # --------------------------------------------------------------
+        MIN_HTML_LEN = 5000
+        if 0 <= html_len < MIN_HTML_LEN:
+            log(f"[EARLY-EXIT] HTML troppo corto ({html_len} < {MIN_HTML_LEN}). "
+                "Probabile pagina di blocco / stub. Salvo snapshot e ritorno 0 risultati.")
+            try:
+                _snapshot(driver, "early_exit_short_html")
+            except Exception as e:
+                log(f"[EARLY-EXIT] Errore nel salvataggio snapshot: {e}")
+            return []
 
         SELECTORS = [
             "article[data-testid='property-card']",
