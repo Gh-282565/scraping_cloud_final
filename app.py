@@ -59,7 +59,30 @@ def diag_uc():
             "trace": traceback.format_exc().splitlines()[-5:]
         }, 500
 
+# --- PWA: route per il service worker ---
+@app.route("/service-worker.js")
+def service_worker():
+    # Il file deve trovarsi in static/service-worker.js
+    return send_from_directory(
+        app.static_folder,
+        "service-worker.js",
+        mimetype="application/javascript"
+    )
+
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key")
+
+# --- Opzionale: scadenza versione beta PWA ---
+# Imposta una data (UTC) per far scadere la versione di prova,
+# oppure lascia None per disattivare il controllo.
+BETA_EXPIRATION = None  # es. datetime(2025, 1, 31)
+
+@app.before_request
+def check_beta_expiration():
+    # Se non vuoi scadenza, lascia BETA_EXPIRATION = None
+    if BETA_EXPIRATION is None:
+        return
+    if datetime.utcnow() > BETA_EXPIRATION:
+        return "Versione di prova scaduta. Contatta l'amministratore.", 403
 
 # ----------------------------
 # No-cache per tutte le risposte
