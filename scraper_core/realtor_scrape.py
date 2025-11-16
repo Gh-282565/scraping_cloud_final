@@ -86,7 +86,7 @@ def _import_driver_factory():
 
 
 from selenium.webdriver.common.by import By
-    from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import WebDriverException
 
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
