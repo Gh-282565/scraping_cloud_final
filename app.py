@@ -13,29 +13,96 @@ from data_loader import load_parametri
 import pandas as pd  # ok anche se non usato; puoi rimuoverlo se vuoi
 
 app = Flask(__name__)
+
+# -------------------------------------------------
+# GESTIONE CODICI DI ACCESSO (test_codes.json + contatore usi)
+# -------------------------------------------------
+CONFIG_CODES_PATH = os.path.join(app.static_folder, "test_codes.json")
+
+# Configurazione codici: {"CODICE": {"max_uses": 10, "used": 0}, ...}
+CODES_CONFIG = {}
+# Stato utilizzo persistito separatamente
+USAGE_PATH = None
+USAGE_STATE = {}
+
+def _load_codes_config():
+    global CODES_CONFIG
+    try:
+        with open(CONFIG_CODES_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                CODES_CONFIG = data
+            else:
+                CODES_CONFIG = {}
+        app.logger.info(f"[AUTH] Caricati {len(CODES_CONFIG)} codici di test da {CONFIG_CODES_PATH}")
+    except FileNotFoundError:
+        CODES_CONFIG = {}
+        app.logger.warning(f"[AUTH] test_codes.json non trovato in {CONFIG_CODES_PATH}: nessun codice configurato")
+    except Exception as e:
+        CODES_CONFIG = {}
+        app.logger.error(f"[AUTH] Errore caricando test_codes.json: {e}")
+
+def _load_usage_state():
+    global USAGE_STATE
+    if not USAGE_PATH:
+        USAGE_STATE = {}
+        return
+    try:
+        with open(USAGE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                USAGE_STATE = {k: int(v) for k, v in data.items()}
+            else:
+                USAGE_STATE = {}
+    except FileNotFoundError:
+        USAGE_STATE = {}
+    except Exception as e:
+        app.logger.error(f"[AUTH] Errore caricando stato uso codici: {e}")
+        USAGE_STATE = {}
+
+def _save_usage_state():
+    if not USAGE_PATH:
+        return
+    try:
+        os.makedirs(os.path.dirname(USAGE_PATH), exist_ok=True)
+        with open(USAGE_PATH, "w", encoding="utf-8") as f:
+            json.dump(USAGE_STATE, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        app.logger.error(f"[AUTH] Errore salvando stato uso codici: {e}")
+
+def check_and_consume_code(code: str):
+    """
+    Restituisce (ok: bool, message: str, remaining: int|None).
+    Se ok=True, incrementa il contatore d'uso del codice.
+    """
+    global USAGE_STATE
+    code = (code or "").strip()
+    if not code:
+        return False, "Codice di accesso mancante.", None
+
+    info = CODES_CONFIG.get(code)
+    if not isinstance(info, dict):
+        return False, "Codice di accesso non valido o non riconosciuto.", None
+
+    try:
+        max_uses = int(info.get("max_uses", 0) or 0)
+    except Exception:
+        max_uses = 0
+
+    used = int(USAGE_STATE.get(code, 0))
+
+    if max_uses > 0 and used >= max_uses:
+        return False, "Questo codice ha esaurito il numero massimo di utilizzi.", 0
+
+    # Consuma un utilizzo
+    USAGE_STATE[code] = used + 1
+    _save_usage_state()
+
+    remaining = max_uses - USAGE_STATE[code] if max_uses > 0 else None
+    return True, "", remaining
+
 import os
 from flask import jsonify, send_from_directory, abort
-
-# -------------------------------------------------
-# CARICAMENTO CODICI DI ACCESSO DA static/test_codes.json
-# -------------------------------------------------
-CODES_PATH = os.path.join(app.static_folder, "test_codes.json")
-
-try:
-    with open(CODES_PATH, "r", encoding="utf-8") as f:
-        _data = json.load(f)
-        VALID_CODES = set(_data.get("codes", []))
-    app.logger.info(f"[AUTH] Caricati {len(VALID_CODES)} codici di test da {CODES_PATH}")
-except FileNotFoundError:
-    VALID_CODES = set()
-    app.logger.warning(f"[AUTH] test_codes.json non trovato in {CODES_PATH}: nessun codice valido configurato")
-except Exception as e:
-    VALID_CODES = set()
-    app.logger.error(f"[AUTH] Errore caricando test_codes.json: {e}")
-
-def is_valid_code(code: str) -> bool:
-    code = (code or "").strip()
-    return bool(code) and code in VALID_CODES
 
 RESULTS_DIR = "/app/results"
 SNAP_DIR = os.path.join(RESULTS_DIR, "snapshots")
@@ -118,6 +185,10 @@ def add_no_cache(resp):
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+USAGE_PATH = os.path.join(RESULTS_DIR, "test_codes_usage.json")
+_load_codes_config()
+_load_usage_state()
 
 # -------------------------------------------------
 # NOMI COMPLETI DEGLI STATI (sigla -> nome intero)
@@ -243,12 +314,18 @@ def reset():
 @app.route("/run_scraper", methods=["POST"])
 def run():
     try:
-        # --- Controllo codice di accesso ---
+        # --- Controllo codice di accesso con limite utilizzi ---
         access_code = (request.form.get("access_code") or "").strip()
-        if not is_valid_code(access_code):
-            app.logger.warning(f"[AUTH] Codice non valido: {access_code!r}")
-            flash("Codice di accesso non valido o scaduto. Controlla il codice e riprova.", "error")
+        ok_code, msg_code, remaining = check_and_consume_code(access_code)
+        if not ok_code:
+            app.logger.warning(f"[AUTH] Codice respinto: {access_code!r} - {msg_code}")
+            flash(msg_code, "error")
             return redirect(url_for("index"))
+        else:
+            if remaining is not None:
+                app.logger.info(f"[AUTH] Codice {access_code!r} utilizzato. Rimanenti: {remaining}")
+            else:
+                app.logger.info(f"[AUTH] Codice {access_code!r} utilizzato (illimitato).")
 
         state = (request.form.get("state") or "").strip().upper()
         county = (request.form.get("county") or "").strip()
