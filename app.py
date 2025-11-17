@@ -16,6 +16,27 @@ app = Flask(__name__)
 import os
 from flask import jsonify, send_from_directory, abort
 
+# -------------------------------------------------
+# CARICAMENTO CODICI DI ACCESSO DA static/test_codes.json
+# -------------------------------------------------
+CODES_PATH = os.path.join(app.static_folder, "test_codes.json")
+
+try:
+    with open(CODES_PATH, "r", encoding="utf-8") as f:
+        _data = json.load(f)
+        VALID_CODES = set(_data.get("codes", []))
+    app.logger.info(f"[AUTH] Caricati {len(VALID_CODES)} codici di test da {CODES_PATH}")
+except FileNotFoundError:
+    VALID_CODES = set()
+    app.logger.warning(f"[AUTH] test_codes.json non trovato in {CODES_PATH}: nessun codice valido configurato")
+except Exception as e:
+    VALID_CODES = set()
+    app.logger.error(f"[AUTH] Errore caricando test_codes.json: {e}")
+
+def is_valid_code(code: str) -> bool:
+    code = (code or "").strip()
+    return bool(code) and code in VALID_CODES
+
 RESULTS_DIR = "/app/results"
 SNAP_DIR = os.path.join(RESULTS_DIR, "snapshots")
 os.makedirs(SNAP_DIR, exist_ok=True)
@@ -222,6 +243,13 @@ def reset():
 @app.route("/run_scraper", methods=["POST"])
 def run():
     try:
+        # --- Controllo codice di accesso ---
+        access_code = (request.form.get("access_code") or "").strip()
+        if not is_valid_code(access_code):
+            app.logger.warning(f"[AUTH] Codice non valido: {access_code!r}")
+            flash("Codice di accesso non valido o scaduto. Controlla il codice e riprova.", "error")
+            return redirect(url_for("index"))
+
         state = (request.form.get("state") or "").strip().upper()
         county = (request.form.get("county") or "").strip()
         acres_min = int(request.form.get("min_acres", "0") or 0)
