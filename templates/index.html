@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Costo Terreni - Contee USA</title>
+  <title>Costo terreni - Contee USA</title>
 
   <!-- PWA manifest + colori tema -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
@@ -66,7 +66,11 @@
     .form-row label{ width:160px; }
     .input-pair{ display:flex; gap:12px; width:100%; }
     .checks{ display:flex; gap:18px; }
-    select, input[type=number]{ padding:10px; width:100%; max-width:340px; }
+    select, input[type=number], input[type=text]{
+      padding:10px;
+      width:100%;
+      max-width:340px;
+    }
     .actions{
       display:flex;
       justify-content:center;
@@ -111,14 +115,23 @@
 
     <div class="header">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="logo">
-      <h1>Ricerca Costo Terreni - Contee USA</h1>
+      <h1>Ricerca costo terreni - Contee USA</h1>
     </div>
 
     <form method="POST" action="/run_scraper">
       <div class="form-row">
+        <label for="access_code">Codice di accesso:</label>
+        <input type="text"
+               id="access_code"
+               name="access_code"
+               placeholder="Inserisci il codice che hai ricevuto"
+               required>
+      </div>
+
+      <div class="form-row">
         <label for="state">Stato:</label>
         <select id="state" name="state" required>
-          <option value="">-- Seleziona Stato --</option>
+          <option value="">-- Seleziona lo Stato --</option>
           {% for code, name in states_full %}
             <option value="{{ code }}">{{ name }}</option>
           {% endfor %}
@@ -128,7 +141,7 @@
       <div class="form-row">
         <label for="county">Contea:</label>
         <select id="county" name="county" required>
-          <option value="">-- Seleziona Contea --</option>
+          <option value="">-- Seleziona la contea --</option>
         </select>
       </div>
 
@@ -151,7 +164,7 @@
       <div class="form-row">
         <label for="period">Periodo:</label>
         <select id="period" name="period">
-          <option value="">-- Seleziona Periodo --</option>
+          <option value="">-- Seleziona il periodo --</option>
           <option value="30gg">30 giorni</option>
           <option value="90gg">90 giorni</option>
           <option value="6M">6 mesi</option>
@@ -169,7 +182,7 @@
 
       <div class="actions">
         <div class="center-btn">
-          <button type="submit" class="btn btn-primary">Avvia Scraping</button>
+          <button type="submit" class="btn btn-primary">Avvia scraping</button>
         </div>
         <div class="side-btn">
           <button type="button" id="btn-reset" class="btn btn-secondary small-btn">Nuova ricerca</button>
@@ -191,7 +204,7 @@
       {% if zillow_ready and zillow_url %}
         <div class="alert ok">
           <strong>[OK]</strong> File Zillow creato.
-          <a class="download-link" href="{{ zillow_url }}" download>Premi qui per il download ⬇️</a>
+          <a class="download-link" href="{{ zillow_url }}" download>Premi qui per scaricare il file ⬇️</a>
         </div>
       {% endif %}
     {% endif %}
@@ -205,10 +218,11 @@
     stateSelect.addEventListener('change', () => {
       const s = stateSelect.value;
       const list = countiesByState[s] || [];
-      countySelect.innerHTML = '<option value="">-- Seleziona Contea --</option>';
+      countySelect.innerHTML = '<option value="">-- Seleziona la contea --</option>';
       list.forEach(name => {
         const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
+        opt.value = name;
+        opt.textContent = name;
         countySelect.appendChild(opt);
       });
     });
@@ -225,8 +239,8 @@
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         navigator.serviceWorker.register("/service-worker.js")
-        .then(reg => console.log("[PWA] Service Worker registrato"))
-        .catch(err => console.log("[PWA] Errore SW", err));
+          .then(reg => console.log("[PWA] Service Worker registrato"))
+          .catch(err => console.log("[PWA] Errore SW", err));
       });
     }
   </script>
